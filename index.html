@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Laser Engineering Mode</title>
+    <title>Laser Engineering Pro</title>
     <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; justify-content: center; border-bottom: 1px solid #333; }
-        button { padding: 12px 15px; border-radius: 10px; border: none; background: #007AFF; color: white; font-weight: bold; font-size: 13px; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
+        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; justify-content: center; border-bottom: 1px solid #333; flex-wrap: wrap; }
+        button { padding: 10px 14px; border-radius: 8px; border: none; background: #007AFF; color: white; font-weight: bold; font-size: 12px; }
         .active { background: #FF9500 !important; }
         #canvas-container { flex-grow: 1; position: relative; touch-action: none; }
-        #status { font-size: 11px; color: #888; text-align: center; padding: 5px; background: #1c1c1e; }
+        #status { font-size: 11px; color: #888; text-align: center; padding: 5px; background: #1c1c1e; border-top: 1px solid #333; }
     </style>
 </head>
 <body>
@@ -19,55 +19,68 @@
     <div class="toolbar">
         <button id="drawBtn">➕ НОВИЙ РОЗМІР</button>
         <button id="photoBtn">📷 ФОТО</button>
-        <button id="delBtn" style="background:#FF3B30">🗑️ ВИДАЛИТИ</button>
+        <button id="laserBtn" style="background:#5856D6">🔌 ЛАЗЕР</button>
+        <button id="delBtn" style="background:#FF3B30">🗑️</button>
         <input type="file" id="fileInp" style="display:none" accept="image/*">
     </div>
 
     <div id="canvas-container">
         <canvas id="c"></canvas>
     </div>
-    <div id="status">Натисніть "Новий розмір" і поставте дві точки</div>
+    <div id="status">Підключіть лазер або додайте розмір</div>
 
 <script>
 (function() {
     let canvas, isDrawing = false, firstPoint = null;
+    let activePair = null; // Поточний вибраний розмір для лазера
+    let bluetoothCharacteristic = null;
 
     window.onload = () => {
         canvas = new fabric.Canvas('c', {
             width: window.innerWidth,
-            height: window.innerHeight - 85,
+            height: window.innerHeight - 90,
             backgroundColor: '#111',
             enableRetinaScaling: true,
             selection: false
         });
 
-        // --- КНОПКИ ---
+        // --- КЕРУВАННЯ ---
         document.getElementById('photoBtn').onclick = () => document.getElementById('fileInp').click();
         
         document.getElementById('drawBtn').onclick = function() {
             isDrawing = !isDrawing;
             this.classList.toggle('active', isDrawing);
-            document.getElementById('status').innerText = isDrawing ? "Вкажіть першу точку" : "Режим редагування";
+            if(isDrawing) deactivateAll();
         };
 
         document.getElementById('delBtn').onclick = () => {
-            const active = canvas.getActiveObject();
-            if (active && active.role === 'anchor') {
-                const pair = active.pair;
-                canvas.remove(pair.p1, pair.p2, pair.line, pair.text);
-                canvas.discardActiveObject().renderAll();
+            if (activePair) {
+                canvas.remove(activePair.p1, activePair.p2, activePair.line, activePair.text);
+                activePair = null;
+                canvas.renderAll();
             }
         };
 
-        // --- МАЛЮВАННЯ ---
-        canvas.on('mouse:down', (opt) => {
-            if (!isDrawing) return;
-            const pointer = canvas.getPointer(opt.e);
+        document.getElementById('laserBtn').onclick = connectLaser;
 
+        // --- ЛОГІКА МАЛЮВАННЯ ---
+        canvas.on('mouse:down', (opt) => {
+            if (!isDrawing) {
+                // Якщо ми не в режимі малювання, перевіряємо чи клікнули по лінії
+                const target = canvas.findTarget(opt.e);
+                if (target && target.pair) {
+                    activatePair(target.pair);
+                } else if (!target) {
+                    deactivateAll();
+                }
+                return;
+            }
+
+            const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
                 firstPoint = pointer;
                 const dot = new fabric.Circle({
-                    left: pointer.x, top: pointer.y, radius: 18, fill: 'rgba(255,255,0,0.4)',
+                    left: pointer.x, top: pointer.y, radius: 5, fill: '#FF9500',
                     originX: 'center', originY: 'center', selectable: false, id: 'temp'
                 });
                 canvas.add(dot);
@@ -81,45 +94,61 @@
         });
 
         function createDimension(p1Pos, p2Pos) {
-            // Створюємо основні вузли (Точки)
             const p1 = new fabric.Circle({
-                left: p1Pos.x, top: p1Pos.y, radius: 20, fill: '#FF9500',
-                originX: 'center', originY: 'center', hasControls: false, role: 'anchor'
+                left: p1Pos.x, top: p1Pos.y, radius: 22, fill: 'rgba(255,149,0,0.6)',
+                originX: 'center', originY: 'center', hasControls: false, visible: false, role: 'anchor'
             });
             const p2 = new fabric.Circle({
-                left: p2Pos.x, top: p2Pos.y, radius: 20, fill: '#FF9500',
-                originX: 'center', originY: 'center', hasControls: false, role: 'anchor'
+                left: p2Pos.x, top: p2Pos.y, radius: 22, fill: 'rgba(255,149,0,0.6)',
+                originX: 'center', originY: 'center', hasControls: false, visible: false, role: 'anchor'
             });
 
-            // Створюємо зв'язок (Лінія)
             const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {
-                stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false
+                stroke: '#FF9500', strokeWidth: 4, selectable: true, hasControls: false, evented: true
             });
 
-            // Створюємо підпис (Текст)
             const text = new fabric.Text('0.000', {
-                fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)',
+                fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.7)',
                 originX: 'center', originY: 'center', selectable: true, hasControls: false, padding: 5
             });
 
-            // Зв'язуємо об'єкти між собою
             const pair = { p1, p2, line, text };
-            p1.pair = p2.pair = text.pair = pair;
+            p1.pair = p2.pair = line.pair = text.pair = pair;
 
-            // Додаємо можливість ручного вводу при кліку на текст
+            // Ручне введення
             text.on('mousedown', () => {
                 const val = prompt("Введіть розмір (м):", text.text);
                 if (val !== null) {
-                    text.set('text', val);
+                    text.set('text', parseFloat(val).toFixed(3));
                     canvas.renderAll();
                 }
             });
 
             canvas.add(line, text, p1, p2);
-            updatePair(pair);
+            activatePair(pair);
         }
 
-        // РУХ ТОЧОК
+        // Активація вузлів при кліку на лінію
+        function activatePair(pair) {
+            deactivateAll();
+            activePair = pair;
+            pair.p1.set('visible', true);
+            pair.p2.set('visible', true);
+            pair.line.set('stroke', '#30D158'); // зелений колір активованого
+            canvas.setActiveObject(pair.line);
+            canvas.renderAll();
+            document.getElementById('status').innerText = "Розмір активований. Можна рухати точки або чекати дані з лазера.";
+        }
+
+        function deactivateAll() {
+            canvas.getObjects().forEach(obj => {
+                if (obj.role === 'anchor') obj.set('visible', false);
+                if (obj.pair) obj.pair.line.set('stroke', '#FF9500');
+            });
+            activePair = null;
+            canvas.renderAll();
+        }
+
         canvas.on('object:moving', (e) => {
             if (e.target.pair) updatePair(e.target.pair);
         });
@@ -134,12 +163,42 @@
             pair.text.setCoords();
         }
 
+        // --- BLUETOOTH ЛАЗЕР ---
+        async function connectLaser() {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'Mileseey' }, { namePrefix: 'D5' }],
+                    optionalServices: ['0000ff00-0000-1000-8000-00805f9b34fb']
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService('0000ff00-0000-1000-8000-00805f9b34fb');
+                const characteristic = await service.getCharacteristic('0000ff01-0000-1000-8000-00805f9b34fb');
+                
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    const data = new Uint8Array(event.target.value.buffer);
+                    // Протокол Mileseey: зазвичай відстань у міліметрах у байтах 3,4,5
+                    const dist = (data[3] * 65536 + data[4] * 256 + data[5]) / 1000;
+                    
+                    if (activePair && dist > 0) {
+                        activePair.text.set('text', dist.toFixed(3));
+                        canvas.renderAll();
+                        document.getElementById('status').innerText = `Отримано з лазера: ${dist.toFixed(3)} м`;
+                    }
+                });
+                document.getElementById('laserBtn').style.background = '#30D158';
+                document.getElementById('status').innerText = "Лазер підключено успішно!";
+            } catch (e) {
+                alert("Bluetooth помилка: " + e.message);
+            }
+        }
+
         // ФОТО
         document.getElementById('fileInp').onchange = (e) => {
             const reader = new FileReader();
             reader.onload = (f) => fabric.Image.fromURL(f.target.result, (img) => {
                 const r = Math.min(canvas.width/img.width, canvas.height/img.height);
-                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r});
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r, originX:'left', originY:'top'});
             });
             reader.readAsDataURL(e.target.files[0]);
         };
