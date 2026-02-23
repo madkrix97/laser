@@ -2,154 +2,117 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LaserApp Final</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Laser Test</title>
+    <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
     <style>
-        :root { --b-blue: #0A84FF; --b-green: #30D158; --b-orange: #FF9F0A; --b-red: #FF453A; }
-        body { font-family: -apple-system, sans-serif; background: #000; color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; border-bottom: 1px solid #333; }
-        button, label { background: var(--b-blue); color: white; border: none; padding: 12px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
-        #canvas-wrapper { flex-grow: 1; position: relative; background: #111; touch-action: none; }
-        #status { font-size: 11px; color: #888; text-align: center; padding: 5px; background: #1c1c1e; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
+        .nav { display: flex; gap: 5px; padding: 10px; background: #222; justify-content: center; }
+        button { padding: 12px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
+        .btn-blue { background: #007AFF; color: white; }
+        .btn-orange { background: #FF9500; color: white; }
+        #canvas-container { flex-grow: 1; position: relative; touch-action: none; }
     </style>
 </head>
 <body>
 
-    <div class="toolbar">
-        <button id="authBtn">🔑 ВХІД</button>
-        <input type="text" id="projectName" placeholder="Об'єкт" style="background:#2c2c2e; color:white; border:1px solid #444; border-radius:6px; padding:8px; width:100px;">
-        <label for="fileInput">📷 ФОТО</label>
-        <input type="file" id="fileInput" style="display:none" accept="image/*">
-        <button id="drawBtn">➕ РОЗМІР</button>
-        <button id="saveBtn" style="background:var(--b-green)">☁️ ЗБЕРЕГТИ</button>
-        <button id="delBtn" style="background:var(--b-red)">🗑️</button>
+    <div class="nav">
+        <input type="file" id="imgLoader" style="display:none" accept="image/*">
+        <button class="btn-blue" id="loadBtn">📷 ФОТО</button>
+        <button class="btn-blue" id="modeBtn">➕ РОЗМІР</button>
+        <button style="background: #ff3b30; color: white;" id="clearBtn">🗑️ ОЧИСТИТИ</button>
     </div>
 
-    <div id="canvas-wrapper">
-        <canvas id="c"></canvas>
+    <div id="canvas-container">
+        <canvas id="mainCanvas"></canvas>
     </div>
-    <div id="status">Статус: Завантаження...</div>
+
+    <div id="info" style="font-size: 10px; text-align: center; padding: 5px; color: #666;">
+        Очікування дій...
+    </div>
 
 <script>
-    const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
-    const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxploТ';
-    
-    let canvas, tokenClient, gapiInited = false, gisInited = false;
-    let isDrawMode = false, firstPoint = null;
+    // Весь код всередині однієї функції, щоб SES не міг його розірвати
+    (function() {
+        let canvas;
+        let isDrawing = false;
+        let startPoint = null;
 
-    // 1. ІНІЦІАЛІЗАЦІЯ КАНВАСУ
-    window.onload = () => {
-        const el = document.getElementById('c');
-        canvas = new fabric.Canvas('c', {
-            width: window.innerWidth,
-            height: window.innerHeight - 120,
-            enableRetinaScaling: true, // Щоб не було "криво" на iPhone
-            selection: true
-        });
+        window.addEventListener('DOMContentLoaded', () => {
+            // Ініціалізація з урахуванням ретини
+            canvas = new fabric.Canvas('mainCanvas', {
+                width: window.innerWidth,
+                height: window.innerHeight - 80,
+                backgroundColor: '#111',
+                enableRetinaScaling: true
+            });
 
-        // ПРИВ'ЯЗКА КНОПОК
-        document.getElementById('drawBtn').onclick = toggleDrawMode;
-        document.getElementById('saveBtn').onclick = syncWithCloud;
-        document.getElementById('authBtn').onclick = handleAuthClick;
-        document.getElementById('delBtn').onclick = () => {
-            const active = canvas.getActiveObject();
-            if (active) {
-                if (active.textLabel) canvas.remove(active.textLabel);
-                canvas.remove(active);
-                canvas.discardActiveObject().renderAll();
-            }
-        };
-
-        // ФОТО
-        document.getElementById('fileInput').onchange = (e) => {
-            const reader = new FileReader();
-            reader.onload = (f) => {
-                fabric.Image.fromURL(f.target.result, (img) => {
-                    const ratio = Math.min(canvas.width / img.width, canvas.height / img.height);
-                    canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
-                        scaleX: ratio, scaleY: ratio, originX: 'left', originY: 'top'
+            // Кнопка ФОТО
+            document.getElementById('loadBtn').onclick = () => document.getElementById('imgLoader').click();
+            
+            document.getElementById('imgLoader').onchange = (e) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    fabric.Image.fromURL(event.target.result, (img) => {
+                        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+                        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
+                            scaleX: scale, scaleY: scale, originX: 'left', originY: 'top'
+                        });
                     });
-                });
+                };
+                reader.readAsDataURL(e.target.files[0]);
             };
-            reader.readAsDataURL(e.target.files[0]);
-        };
 
-        setupDrawing();
-        document.getElementById('status').innerText = "Готово. Оберіть фото.";
-    };
+            // Кнопка РЕЖИМ
+            const modeBtn = document.getElementById('modeBtn');
+            modeBtn.onclick = () => {
+                isDrawing = !isDrawing;
+                modeBtn.className = isDrawing ? 'btn-orange' : 'btn-blue';
+                document.getElementById('info').innerText = isDrawing ? "РЕЖИМ: Клікніть 2 точки" : "РЕЖИМ: Вибір";
+                canvas.selection = !isDrawing;
+            };
 
-    // 2. ЛОГІКА МАЛЮВАННЯ
-    function setupDrawing() {
-        canvas.on('mouse:down', (opt) => {
-            if (!isDrawMode) return;
-            const pointer = canvas.getPointer(opt.e);
-
-            if (!firstPoint) {
-                firstPoint = pointer;
-                const dot = new fabric.Circle({ 
-                    left: pointer.x - 4, top: pointer.y - 4, radius: 5, 
-                    fill: 'yellow', selectable: false, id: 'tmp' 
-                });
-                canvas.add(dot);
-            } else {
-                const line = new fabric.Line([firstPoint.x, firstPoint.y, pointer.x, pointer.y], {
-                    stroke: 'yellow', strokeWidth: 4, selectable: true, hasControls: true
-                });
-                const text = new fabric.Text('?', {
-                    fontSize: 20, fill: 'white', backgroundColor: 'black',
-                    left: (firstPoint.x + pointer.x) / 2, top: (firstPoint.y + pointer.y) / 2,
-                    selectable: false
-                });
-                line.textLabel = text;
-                
-                // Оновлення позиції тексту при русі лінії
-                line.on('moving', () => {
-                    text.set({ left: (line.x1 + line.x2)/2 + line.left - (line.x1+line.x2)/2, 
-                               top: (line.y1 + line.y2)/2 + line.top - (line.y1+line.y2)/2 });
-                });
-
-                canvas.add(line, text);
-                canvas.getObjects('circle').forEach(o => { if(o.id==='tmp') canvas.remove(o); });
-                firstPoint = null;
+            // Кнопка ОЧИСТИТИ
+            document.getElementById('clearBtn').onclick = () => {
+                canvas.clear();
+                canvas.backgroundColor = '#111';
                 canvas.renderAll();
-            }
+            };
+
+            // МАЛЮВАННЯ ЛІНІЙ
+            canvas.on('mouse:down', (o) => {
+                if (!isDrawing) return;
+                const pointer = canvas.getPointer(o.e);
+
+                if (!startPoint) {
+                    startPoint = pointer;
+                    const circle = new fabric.Circle({
+                        left: pointer.x - 3, top: pointer.y - 3,
+                        radius: 6, fill: 'red', selectable: false, id: 'temp'
+                    });
+                    canvas.add(circle);
+                } else {
+                    const line = new fabric.Line([startPoint.x, startPoint.y, pointer.x, pointer.y], {
+                        stroke: 'yellow', strokeWidth: 4, selectable: true, hasControls: true
+                    });
+                    
+                    const text = new fabric.Text('0.000m', {
+                        fontSize: 24, fill: 'white', backgroundColor: 'rgba(0,0,0,0.7)',
+                        left: (startPoint.x + pointer.x) / 2, top: (startPoint.y + pointer.y) / 2,
+                        selectable: true
+                    });
+
+                    canvas.add(line, text);
+                    // Видаляємо точку
+                    const objs = canvas.getObjects().filter(obj => obj.id === 'temp');
+                    objs.forEach(obj => canvas.remove(obj));
+                    
+                    startPoint = null;
+                    canvas.renderAll();
+                }
+            });
         });
-    }
-
-    function toggleDrawMode() {
-        isDrawMode = !isDrawMode;
-        canvas.discardActiveObject().renderAll();
-        canvas.selection = !isDrawMode;
-        document.getElementById('drawBtn').style.background = isDrawMode ? '#FF9F0A' : '#0A84FF';
-        document.getElementById('status').innerText = isDrawMode ? "РЕЖИМ: Ставте точки" : "РЕЖИМ: Редагування";
-    }
-
-    // 3. GOOGLE API
-    function gapiLoaded() {
-        gapi.load('client', async () => {
-            await gapi.client.init({apiKey: API_KEY, discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]});
-            gapiInited = true;
-        });
-    }
-
-    function gisLoaded() {
-        tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: CLIENT_ID, scope: "https://www.googleapis.com/auth/drive.file",
-            callback: (r) => { if(!r.error) document.getElementById('authBtn').innerText = "✅ OK"; }
-        });
-    }
-
-    function handleAuthClick() { if(tokenClient) tokenClient.requestAccessToken(); }
-    
-    async function syncWithCloud() {
-        if(!gapiInited) return alert("Google ще не готовий");
-        alert("Починаю збереження...");
-        // Тут твоя логіка uploadMultipart з попереднього повідомлення
-    }
+    })();
 </script>
-
-<script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-<script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
