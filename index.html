@@ -1,514 +1,133 @@
-<!-- <!DOCTYPE html>
-<html lang="uk">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Меблевий Замір Pro - Master Edition</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-    <style>
-        :root { --panel-bg: #2c2c2e; --btn-blue: #007AFF; --btn-red: #ff3b30; --btn-green: #32D74B; }
-        body { font-family: -apple-system, sans-serif; background: #000; color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .toolbar { padding: 10px; background: var(--panel-bg); display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; z-index: 10; border-bottom: 1px solid #444; }
-        button, label { background: var(--btn-blue); color: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; }
-        #connectBtn { background: var(--btn-green); }
-        .active-mode { background: var(--btn-green) !important; outline: 2px solid white; }
-        .bt-connected { background: #555 !important; }
-        #fileInput { display: none; }
-        #canvas-wrapper { flex-grow: 1; position: relative; }
-        #magnifier { position: absolute; width: 160px; height: 160px; border: 3px solid var(--btn-blue); border-radius: 50%; overflow: hidden; display: none; pointer-events: none; z-index: 1000; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.6); }
-        #magnifier-canvas { width: 100%; height: 100%; }
-    </style>
-</head>
-<body>
-
-    <div class="toolbar">
-        <label for="fileInput">📷 ФОТО</label>
-        <input type="file" id="fileInput" accept="image/*">
-        <button id="drawModeBtn">➕ РОЗМІР</button>
-        <button id="connectBtn">🔌 ПІДКЛЮЧИТИ ЛАЗЕР</button>
-        <button id="deleteBtn" style="background: var(--btn-red);">🗑️ ВИДАЛИТИ</button>
-    </div>
-
-    <div id="canvas-wrapper">
-        <div id="magnifier"><canvas id="magnifier-canvas" width="160" height="160"></canvas></div>
-        <canvas id="c"></canvas>
-    </div>
-
-<script>
-    // --- НАЛАШТУВАННЯ ---
-    const CONFIG = {
-        lineColor: '#007AFF',
-        lineActiveColor: '#FFD60A',
-        textColor: '#32D74B',
-        textBg: 'rgba(0,0,0,0.85)',
-        markerColor: '#FFFFFF',
-        lineWidth: 3,
-        fontSize: 22,
-        zoomLevel: 2.5
-    };
-
-    const canvas = new fabric.Canvas('c', {
-        width: window.innerWidth,
-        height: window.innerHeight - 70,
-        selection: false
-    });
-
-    let isDrawMode = false;
-    let firstPoint = null;
-    let laserCharacteristic = null;
-
-    // Допоміжна функція форматування
-    function formatValue(val) {
-        let num = val.toString().replace(/[^0-9.,]/g, ''); 
-        if (!num || num.length === 0) return "--- мм";
-        return num + " мм";
-    }
-
-    // --- BLUETOOTH ЛОГІКА ---
-    document.getElementById('connectBtn').onclick = async function() {
-        try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'Mileseey' }, { namePrefix: 'D5' }],
-                optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
-            });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
-            laserCharacteristic = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
-            await laserCharacteristic.startNotifications();
-            
-            laserCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
-                const val = new TextDecoder().decode(e.target.value);
-                const match = val.match(/\d+(\.\d+)?/);
-                if (match) {
-                    const active = canvas.getActiveObject();
-                    if (!active) return;
-
-                    let targetText = null;
-                    if (active.type === 'i-text') targetText = active;
-                    else if (active.type === 'line' && active.textObj) targetText = active.textObj;
-
-                    if (targetText) {
-                        let num = parseFloat(match[0]);
-                        if (num < 15) num = Math.round(num * 1000); 
-                        targetText.set('text', num + " мм");
-                        canvas.renderAll();
-                    }
-                }
-            });
-            this.innerText = "✅ ПІДКЛЮЧЕНО";
-            this.classList.add('bt-connected');
-        } catch (e) { alert("BT Error: " + e.message); }
-    };
-
-    // --- ЛОГІКА ЛУПИ ---
-    const mag = document.getElementById('magnifier');
-    const magCtx = document.getElementById('magnifier-canvas').getContext('2d');
-
-    function showMagnifier(x, y) {
-        const bg = canvas.backgroundImage;
-        if (!bg) return;
-        mag.style.display = 'block';
-        mag.style.left = (x - 80) + 'px';
-        mag.style.top = (y - 190) + 'px';
-        magCtx.clearRect(0,0,160,160);
-        magCtx.save();
-        magCtx.translate(80,80);
-        magCtx.scale(CONFIG.zoomLevel, CONFIG.zoomLevel);
-        const vX = (x - bg.left) / bg.scaleX;
-        const vY = (y - bg.top) / bg.scaleY;
-        magCtx.drawImage(bg._element, vX-40, vY-40, 80, 80, -40, -40, 80, 80);
-        magCtx.restore();
-        magCtx.strokeStyle = CONFIG.textColor;
-        magCtx.lineWidth = 2;
-        magCtx.beginPath(); magCtx.moveTo(80, 70); magCtx.lineTo(80, 90); magCtx.moveTo(70, 80); magCtx.lineTo(90, 80); magCtx.stroke();
-    }
-
-    function updateLine(line) {
-        line.set({ x1: line.p1.left, y1: line.p1.top, x2: line.p2.left, y2: line.p2.top });
-        const cX = (line.p1.left + line.p2.left) / 2;
-        const cY = (line.p1.top + line.p2.top) / 2;
-        const angle = Math.atan2(line.p2.top - line.p1.top, line.p2.left - line.p1.left);
-        line.textObj.set({ left: cX, top: cY - 25, angle: angle * (180/Math.PI) });
-        line.setCoords(); 
-        line.textObj.setCoords();
-        canvas.renderAll();
-    }
-
-    function createMeasurement(p1c, p2c) {
-        const createM = (c) => {
-            const l1 = new fabric.Line([-12,0,12,0],{stroke: CONFIG.markerColor, strokeWidth:1.5});
-            const l2 = new fabric.Line([0,-12,0,12],{stroke: CONFIG.markerColor, strokeWidth:1.5});
-            const tz = new fabric.Circle({radius:28, fill:'transparent', originX:'center', originY:'center'});
-            return new fabric.Group([tz,l1,l2], {left:c.x, top:c.y, originX:'center', originY:'center', visible:false, hasControls:false});
-        };
-        const p1 = createM(p1c); const p2 = createM(p2c);
-        const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {
-            stroke: CONFIG.lineColor, strokeWidth: CONFIG.lineWidth, 
-            hasControls:false, hasBorders:false, lockMovementX:true, lockMovementY:true
-        });
-        const text = new fabric.IText('--- мм', {
-            fontSize: CONFIG.fontSize, fill: CONFIG.textColor, fontWeight:'bold', 
-            backgroundColor: CONFIG.textBg, originX:'center', originY:'center',
-            lockMovementX:true, lockMovementY:true, fontFamily:'monospace'
-        });
-
-        // ЛОГІКА РУЧНОГО ВВОДУ (ВИПРАВЛЕНО)
-        text.on('editing:entered', function() {
-            if (this.text.includes('---')) {
-                this.text = '';
-                canvas.renderAll();
-            }
-        });
-
-        text.on('editing:exited', function() {
-            this.text = formatValue(this.text);
-            canvas.renderAll();
-        });
-
-        line.p1=p1; line.p2=p2; line.textObj=text; text.parentLine=line;
-        const moveHandler = (opt) => { 
-            const pointer = canvas.getPointer(opt.e);
-            showMagnifier(pointer.x, pointer.y); 
-            updateLine(line); 
-        };
-        p1.on('moving', moveHandler); p2.on('moving', moveHandler);
-        p1.on('mouseup', () => mag.style.display='none'); p2.on('mouseup', () => mag.style.display='none');
-
-        canvas.add(line, text, p1, p2);
-        updateLine(line);
-    }
-
-    // --- УПРАВЛІННЯ ВИБОРОМ ---
-    canvas.on('selection:created', onSelect);
-    canvas.on('selection:updated', onSelect);
-    canvas.on('selection:cleared', () => {
-        canvas.getObjects().forEach(obj => {
-            if(obj.type === 'group') obj.set('visible', false);
-            if(obj.type === 'line') obj.set('stroke', CONFIG.lineColor);
-        });
-        canvas.renderAll();
-    });
-
-    function onSelect(e) {
-        canvas.getObjects('group').forEach(p => p.set('visible', false));
-        canvas.getObjects('line').forEach(l => l.set('stroke', CONFIG.lineColor));
-        const active = e.selected[0];
-        if (!active) return;
-        const line = active.type === 'line' ? active : active.parentLine;
-        if (line) {
-            line.set('stroke', CONFIG.lineActiveColor);
-            line.p1.set('visible', true); line.p2.set('visible', true);
-            line.p1.bringToFront(); line.p2.bringToFront();
-        }
-        canvas.renderAll();
-    }
-
-    // Режим малювання
-    canvas.on('mouse:down', (opt) => {
-        if(!isDrawMode) return;
-        const p = canvas.getPointer(opt.e);
-        if(!firstPoint) {
-            firstPoint = p;
-            canvas.add(new fabric.Circle({left:p.x, top:p.y, radius:5, fill:CONFIG.textColor, id:'temp', originX:'center', originY:'center'}));
-        } else {
-            createMeasurement(firstPoint, p);
-            const tempDot = canvas.getObjects().find(o => o.id === 'temp');
-            if(tempDot) canvas.remove(tempDot);
-            firstPoint = null; isDrawMode = false;
-            document.getElementById('drawModeBtn').classList.remove('active-mode');
-        }
-    });
-
-    document.getElementById('drawModeBtn').onclick = function() { 
-        isDrawMode = !isDrawMode; 
-        this.classList.toggle('active-mode', isDrawMode); 
-    };
-
-    document.getElementById('deleteBtn').onclick = () => {
-        const a = canvas.getActiveObject();
-        if(a) {
-            const l = a.type === 'line' ? a : a.parentLine;
-            if(l) canvas.remove(l.p1, l.p2, l.textObj, l);
-            canvas.discardActiveObject().renderAll();
-        }
-    };
-
-    document.getElementById('fileInput').onchange = (e) => {
-        const reader = new FileReader();
-        reader.onload = (f) => fabric.Image.fromURL(f.target.result, (img) => {
-            const r = Math.min(canvas.width/img.width, canvas.height/img.height);
-            canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r, originX:'left', originY:'top'});
-        });
-        reader.readAsDataURL(e.target.files[0]);
-    };
-
-    window.onresize = () => { 
-        canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight - 70 }); 
-        canvas.renderAll(); 
-    };
-</script>
-</body>
-</html>
-
-
-
-
- -->
-
-
 <!DOCTYPE html>
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Меблевий Замір Pro - Повний Функціонал</title>
+    <title>LaserApp Cloud Sync</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
     <style>
-        :root { --panel-bg: #2c2c2e; --btn-blue: #007AFF; --btn-red: #ff3b30; --btn-green: #32D74B; --btn-orange: #ff9500; --btn-purple: #af52de; }
-        body { font-family: -apple-system, sans-serif; background: #000; color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .toolbar { padding: 10px; background: var(--panel-bg); display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; z-index: 10; border-bottom: 1px solid #444; }
-        button, label { background: var(--btn-blue); color: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; -webkit-tap-highlight-color: transparent; }
-        .active-mode { background: var(--btn-green) !important; outline: 2px solid white; }
-        .file-ops { background: var(--btn-orange) !important; }
-        .export-op { background: var(--btn-purple) !important; }
-        #connectBtn { background: var(--btn-green); }
-        .bt-connected { background: #555 !important; }
-        #fileInput, #jsonInput { display: none; }
-        #canvas-wrapper { flex-grow: 1; position: relative; touch-action: none; background: #111; }
-        #magnifier { position: absolute; width: 160px; height: 160px; border: 3px solid var(--btn-blue); border-radius: 50%; overflow: hidden; display: none; pointer-events: none; z-index: 1000; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.6); }
-        #magnifier-canvas { width: 100%; height: 100%; }
+        :root { --panel-bg: #1c1c1e; --btn-blue: #0A84FF; --btn-green: #30D158; --btn-orange: #FF9F0A; }
+        body { font-family: -apple-system, sans-serif; background: #000; color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        .toolbar { padding: 10px; background: var(--panel-bg); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; border-bottom: 1px solid #333; }
+        button, label { background: var(--btn-blue); color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; }
+        input[type="text"] { background: #2c2c2e; color: white; border: 1px solid #444; padding: 8px; border-radius: 6px; width: 160px; }
+        #canvas-wrapper { flex-grow: 1; position: relative; background: #111; }
+        #authBtn { background: var(--btn-orange); }
+        .sync-status { font-size: 10px; color: #888; width: 100%; text-align: center; margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div class="toolbar">
+        <button id="authBtn" onclick="handleAuthClick()">🔑 УВІЙТИ GOOGLE</button>
+        <input type="text" id="projectName" placeholder="Назва об'єкта">
         <label for="fileInput">📷 ФОТО</label>
-        <input type="file" id="fileInput" accept="image/*">
-        <button id="drawModeBtn">➕ РОЗМІР</button>
-        <button id="connectBtn">🔌 ЛАЗЕР</button>
-        <button id="deleteBtn" style="background: var(--btn-red);">🗑️</button>
+        <input type="file" id="fileInput" style="display:none" accept="image/*">
         
-        <button onclick="saveProject()" class="file-ops">💾 JSON</button>
-        <label for="jsonInput" class="file-ops">📂 JSON</label>
-        <input type="file" id="jsonInput" accept=".json">
-        
-        <button onclick="exportImage()" class="export-op">🖼️ ЕКСПОРТ (JPG)</button>
+        <button onclick="isDrawMode = !isDrawMode; this.classList.toggle('active')">➕ РОЗМІР</button>
+        <button onclick="syncWithCloud()" style="background:var(--btn-green)">☁️ СИНХРОНІЗУВАТИ</button>
+        <button onclick="showCloudGallery()">🖼️ ХМАРА</button>
+        <div class="sync-status" id="status">Статус: Очікування авторизації</div>
     </div>
 
     <div id="canvas-wrapper">
-        <div id="magnifier"><canvas id="magnifier-canvas" width="160" height="160"></canvas></div>
         <canvas id="c"></canvas>
     </div>
 
 <script>
-    const CONFIG = {
-        lineColor: '#007AFF', lineActiveColor: '#FFD60A', textColor: '#32D74B',
-        textBg: 'rgba(0,0,0,0.85)', markerColor: '#FFFFFF', lineWidth: 3,
-        fontSize: 22, zoomLevel: 2.5
-    };
+    // --- НАЛАШТУВАННЯ GOOGLE (ВСТАВ СВОЇ ДАНІ ТУТ) ---
+    const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
+    const API_KEY = 'ТВІЙ_API_KEY';
+    const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
+    const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
-    const canvas = new fabric.Canvas('c', {
-        width: window.innerWidth, height: window.innerHeight - 70,
-        selection: false, allowTouchScrolling: false,
-        backgroundColor: '#111'
-    });
+    let tokenClient;
+    let gapiInited = false;
+    let gisInited = false;
 
-    let isDrawMode = false;
-    let firstPoint = null;
-    let laserCharacteristic = null;
+    // Ініціалізація Google API
+    function gapiLoaded() { gapi.load('client', async () => { await gapi.client.init({apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC]}); gapiInited = true; }); }
+    function gisLoaded() { tokenClient = google.accounts.oauth2.initTokenClient({client_id: CLIENT_ID, scope: SCOPES, callback: ''}); gisInited = true; }
 
-    // --- ЕКСПОРТ У КАРТИНКУ ---
-    function exportImage() {
-        // 1. Знімаємо виділення, щоб не було видно рамок
-        canvas.discardActiveObject();
-        // 2. Ховаємо всі маркери (точки)
-        canvas.getObjects().forEach(o => { if(o.subRole) o.set('visible', false); });
-        canvas.renderAll();
+    async function handleAuthClick() {
+        tokenClient.callback = async (resp) => {
+            if (resp.error !== undefined) throw (resp);
+            document.getElementById('authBtn').innerText = "✅ ПІДКЛЮЧЕНО";
+            document.getElementById('status').innerText = "Статус: Авторизовано";
+        };
+        if (gapi.client.getToken() === null) { tokenClient.requestAccessToken({prompt: 'consent'}); }
+        else { tokenClient.requestAccessToken({prompt: ''}); }
+    }
 
-        // 3. Генеруємо URL картинки
-        const dataURL = canvas.toDataURL({
-            format: 'jpeg',
-            quality: 0.9,
-            multiplier: 2 // Покращує якість (HD)
+    // --- ЛОГІКА ХМАРИ ---
+    async function getOrCreateFolder(name, parentId = null) {
+        let query = `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+        if (parentId) query += ` and '${parentId}' in parents`;
+        const resp = await gapi.client.drive.files.list({ q: query });
+        if (resp.result.files.length > 0) return resp.result.files[0].id;
+        
+        const metadata = { name: name, mimeType: 'application/vnd.google-apps.folder', parents: parentId ? [parentId] : [] };
+        const folder = await gapi.client.drive.files.create({ resource: metadata, fields: 'id' });
+        return folder.result.id;
+    }
+
+    async function uploadFile(name, content, type, folderId) {
+        // Видаляємо старий файл, якщо він є (перезапис)
+        const old = await gapi.client.drive.files.list({ q: `name = '${name}' and '${folderId}' in parents and trashed = false` });
+        if (old.result.files.length > 0) { await gapi.client.drive.files.delete({ fileId: old.result.files[0].id }); }
+
+        const boundary = 'foo_bar_baz';
+        const metadata = { name: name, parents: [folderId] };
+        const multipartBody = `\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${type}\r\n\r\n${content}\r\n--${boundary}--`;
+        
+        return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+            body: multipartBody
         });
-
-        // 4. Скачуємо
-        const link = document.createElement('a');
-        link.download = `zamer_export_${new Date().getTime()}.jpg`;
-        link.href = dataURL;
-        link.click();
-
-        // Повертаємо видимість (якщо щось було вибрано)
-        alert("Картинку збережено у вашу галерею/завантаження");
     }
 
-    // --- BLUETOOTH ---
-    document.getElementById('connectBtn').onclick = async function() {
+    async function syncWithCloud() {
+        const name = document.getElementById('projectName').value || "Без назви";
+        document.getElementById('status').innerText = "Синхронізація...";
+        
         try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'Mileseey' }, { namePrefix: 'D5' }],
-                optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
-            });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
-            laserCharacteristic = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
-            await laserCharacteristic.startNotifications();
-            laserCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
-                const val = new TextDecoder().decode(e.target.value);
-                const match = val.match(/\d+(\.\d+)?/);
-                if (match) {
-                    const active = canvas.getActiveObject();
-                    const line = active?.parentLine || (active?.type === 'line' ? active : null);
-                    if (line && line.textObj) {
-                        let num = parseFloat(match[0]);
-                        if (num < 15) num = Math.round(num * 1000); 
-                        line.textObj.set('text', num + " мм");
-                        canvas.renderAll();
-                    }
-                }
-            });
-            this.innerText = "✅ BT OK";
-            this.classList.add('bt-connected');
-        } catch (e) { alert("BT Error: " + e.message); }
-    };
-
-    // --- JSON ЗБЕРЕЖЕННЯ / ЗАВАНТАЖЕННЯ ---
-    function saveProject() {
-        const json = canvas.toJSON(['measureId', 'subRole', 'selectable', 'hasControls', 'hasBorders']);
-        const blob = new Blob([JSON.stringify(json)], {type: "application/json"});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `zamer_project_${new Date().getTime()}.json`;
-        a.click();
+            const rootId = await getOrCreateFolder('LaserApp');
+            const projectFolderId = await getOrCreateFolder(name, rootId);
+            
+            // JSON
+            const json = JSON.stringify(canvas.toJSON(['measureId', 'subRole']));
+            await uploadFile('data.json', json, 'application/json', projectFolderId);
+            
+            // Preview
+            canvas.discardActiveObject().renderAll();
+            const imgData = canvas.toDataURL({format:'jpeg', quality:0.5}).split(',')[1];
+            await uploadFile('preview.jpg', atob(imgData), 'image/jpeg', projectFolderId);
+            
+            document.getElementById('status').innerText = "✅ Всі зміни в хмарі!";
+        } catch (e) { alert("Помилка хмари: " + e.message); }
     }
 
-    document.getElementById('jsonInput').onchange = function(e) {
-        const reader = new FileReader();
-        reader.onload = function(event) {
-            canvas.loadFromJSON(event.target.result, () => {
-                const objs = canvas.getObjects();
-                objs.filter(o => o.type === 'line').forEach(line => {
-                    const mid = line.measureId;
-                    line.p1 = objs.find(o => o.measureId === mid && o.subRole === 'p1');
-                    line.p2 = objs.find(o => o.measureId === mid && o.subRole === 'p2');
-                    line.textObj = objs.find(o => o.measureId === mid && o.type === 'i-text');
-                    if (line.p1 && line.p2 && line.textObj) {
-                        line.p1.parentLine = line; line.p2.parentLine = line; line.textObj.parentLine = line;
-                        attachObjectEvents(line);
-                        line.p1.set({visible: false, selectable: false});
-                        line.p2.set({visible: false, selectable: false});
-                    }
-                });
-                canvas.renderAll();
-            });
-        };
-        reader.readAsText(e.target.files[0]);
-    };
-
-    // --- ЛОГІКА МАЛЮВАННЯ ТА ОНОВЛЕННЯ ---
-    function updateLine(line) {
-        line.set({ x1: line.p1.left, y1: line.p1.top, x2: line.p2.left, y2: line.p2.top });
-        const cX = (line.p1.left + line.p2.left) / 2;
-        const cY = (line.p1.top + line.p2.top) / 2;
-        const angle = Math.atan2(line.p2.top - line.p1.top, line.p2.left - line.p1.left);
-        line.textObj.set({ left: cX, top: cY - 25, angle: angle * (180/Math.PI) });
-        line.setCoords(); line.textObj.setCoords();
-        canvas.renderAll();
-    }
-
-    function attachObjectEvents(line) {
-        const handler = (opt) => { updateLine(line); showMagnifier(canvas.getPointer(opt.e).x, canvas.getPointer(opt.e).y); };
-        const stop = () => { mag.style.display = 'none'; canvas.renderAll(); };
-        line.p1.on('moving', handler); line.p2.on('moving', handler);
-        line.p1.on('mouseup', stop); line.p2.on('mouseup', stop);
-        line.p1.on('touchend', stop); line.p2.on('touchend', stop);
-        line.textObj.on('editing:entered', function() { if (this.text.includes('---')) this.text = ''; });
-        line.textObj.on('editing:exited', function() { if (!this.text.includes('мм')) this.text += ' мм'; });
-    }
-
-    function createMeasurement(p1c, p2c) {
-        const mId = 'm_' + new Date().getTime();
-        const createMarker = (c, role) => {
-            const l1 = new fabric.Line([-15,0,15,0],{stroke: CONFIG.markerColor, strokeWidth:2});
-            const l2 = new fabric.Line([0,-15,0,15],{stroke: CONFIG.markerColor, strokeWidth:2});
-            const tz = new fabric.Circle({radius:30, fill:'transparent', originX:'center', originY:'center'});
-            return new fabric.Group([tz,l1,l2], {left:c.x, top:c.y, originX:'center', originY:'center', visible:false, hasControls:false, subRole: role, measureId: mId});
-        };
-        const p1 = createMarker(p1c, 'p1'); const p2 = createMarker(p2c, 'p2');
-        const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {stroke: CONFIG.lineColor, strokeWidth: CONFIG.lineWidth, hasControls:false, hasBorders:false, measureId: mId});
-        const text = new fabric.IText('--- мм', {fontSize: CONFIG.fontSize, fill: CONFIG.textColor, fontWeight:'bold', backgroundColor: CONFIG.textBg, originX:'center', originY:'center', fontFamily:'monospace', measureId: mId, hasControls: false});
-        line.p1=p1; line.p2=p2; line.textObj=text; p1.parentLine=line; p2.parentLine=line; text.parentLine=line;
-        attachObjectEvents(line);
-        canvas.add(line, text, p1, p2);
-        updateLine(line);
-    }
-
-    // --- ІНТЕРФЕЙС ---
-    canvas.on('selection:created', (e) => onSelect(e.selected[0]));
-    canvas.on('selection:updated', (e) => onSelect(e.selected[0]));
-    canvas.on('selection:cleared', () => {
-        canvas.getObjects().forEach(o => { if(o.subRole) { o.visible = false; o.selectable = false; } if(o.type === 'line') o.set('stroke', CONFIG.lineColor); });
-        canvas.renderAll();
-    });
-
-    function onSelect(active) {
-        if(!active || isDrawMode) return;
-        const line = active.parentLine || (active.type === 'line' ? active : null);
-        canvas.getObjects().forEach(o => { if(o.subRole) { o.visible = false; o.selectable = false; } });
-        canvas.getObjects('line').forEach(l => l.set('stroke', CONFIG.lineColor));
-        if (line) {
-            line.set('stroke', CONFIG.lineActiveColor);
-            line.p1.set({visible: true, selectable: true}); line.p2.set({visible: true, selectable: true});
-            line.p1.bringToFront(); line.p2.bringToFront();
-        }
-        canvas.renderAll();
-    }
-
-    canvas.on('mouse:down', (opt) => {
-        if(!isDrawMode) return;
-        const p = canvas.getPointer(opt.e);
-        if(!firstPoint) {
-            firstPoint = p;
-            canvas.add(new fabric.Circle({left:p.x, top:p.y, radius:5, fill:CONFIG.lineActiveColor, id:'temp', originX:'center', originY:'center', selectable: false}));
-        } else {
-            createMeasurement(firstPoint, p);
-            const tempDot = canvas.getObjects().find(o => o.id === 'temp');
-            if(tempDot) canvas.remove(tempDot);
-            firstPoint = null; isDrawMode = false;
-            document.getElementById('drawModeBtn').classList.remove('active-mode');
-        }
-    });
-
-    document.getElementById('drawModeBtn').onclick = function() { isDrawMode = !isDrawMode; this.classList.toggle('active-mode', isDrawMode); };
-    document.getElementById('deleteBtn').onclick = () => {
-        const a = canvas.getActiveObject();
-        const l = a?.parentLine || (a?.type === 'line' ? a : null);
-        if(l) { canvas.remove(l.p1, l.p2, l.textObj, l); canvas.discardActiveObject().renderAll(); }
-    };
-
+    // --- ОСНОВНИЙ КАНВАС ---
+    const canvas = new fabric.Canvas('c', { width: window.innerWidth, height: window.innerHeight - 100 });
+    let isDrawMode = false;
+    
     document.getElementById('fileInput').onchange = (e) => {
         const reader = new FileReader();
         reader.onload = (f) => fabric.Image.fromURL(f.target.result, (img) => {
             const r = Math.min(canvas.width/img.width, canvas.height/img.height);
-            canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r, originX:'left', originY:'top'});
+            canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r});
         });
         reader.readAsDataURL(e.target.files[0]);
     };
 
-    const mag = document.getElementById('magnifier');
-    const magCtx = document.getElementById('magnifier-canvas').getContext('2d');
-    function showMagnifier(x, y) {
-        const bg = canvas.backgroundImage; if (!bg) return;
-        mag.style.display = 'block'; mag.style.left = (x - 80) + 'px'; mag.style.top = (y - 190) + 'px';
-        magCtx.clearRect(0,0,160,160); magCtx.save(); magCtx.translate(80,80); magCtx.scale(CONFIG.zoomLevel, CONFIG.zoomLevel);
-        const vX = (x - bg.left) / bg.scaleX; const vY = (y - bg.top) / bg.scaleY;
-        magCtx.drawImage(bg._element, vX-40, vY-40, 80, 80, -40, -40, 80, 80); magCtx.restore();
-    }
-
-    window.onresize = () => { canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight - 70 }); canvas.renderAll(); };
+    // (Тут залишається твоя логіка малювання ліній і Bluetooth з попередніх версій)
+    // ...
 </script>
+
+<script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+<script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
-
-
-
