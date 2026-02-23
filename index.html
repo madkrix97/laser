@@ -3,175 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Laser Engineering Fix</title>
+    <title>Laser Pro Cloud</title>
     <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
-        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; justify-content: center; border-bottom: 1px solid #333; }
-        button { padding: 12px 15px; border-radius: 10px; border: none; background: #007AFF; color: white; font-weight: bold; font-size: 13px; }
-        .active-btn { background: #FF9500 !important; }
-        #c-container { flex-grow: 1; position: relative; touch-action: none; }
-        #status { font-size: 12px; color: #888; text-align: center; padding: 6px; background: #1c1c1e; border-top: 1px solid #333; }
+        :root { --blue: #0A84FF; --green: #30D158; --orange: #FF9500; --red: #FF453A; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; font-family: -apple-system, sans-serif; }
+        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; justify-content: center; border-bottom: 1px solid #333; flex-wrap: wrap; }
+        button { padding: 10px 14px; border-radius: 8px; border: none; background: var(--blue); color: white; font-weight: bold; font-size: 12px; cursor: pointer; }
+        .active { background: var(--orange) !important; }
+        #canvas-container { flex-grow: 1; position: relative; touch-action: none; background: #111; }
+        #status { font-size: 11px; color: #888; text-align: center; padding: 5px; background: #1c1c1e; border-top: 1px solid #333; }
+        input[type="text"] { background: #2c2c2e; color: white; border: 1px solid #444; border-radius: 6px; padding: 8px; width: 100px; }
     </style>
 </head>
 <body>
 
     <div class="toolbar">
-        <button id="drawBtn">➕ РОЗМІР</button>
-        <button id="photoBtn">📷 ФОТО</button>
-        <button id="laserBtn" style="background:#5856D6">🔌 ЛАЗЕР</button>
-        <button id="delBtn" style="background:#FF3B30">🗑️</button>
+        <button id="authBtn">🔑 ВХІД</button>
+        <input type="text" id="objName" placeholder="Об'єкт">
+        <label for="fileInp" style="background:var(--blue); color:white; padding:10px; border-radius:8px; font-size:12px; font-weight:bold;">📷 ФОТО</label>
         <input type="file" id="fileInp" style="display:none" accept="image/*">
+        <button id="drawBtn">➕ РОЗМІР</button>
+        <button id="laserBtn" style="background:#5856D6">🔌 ЛАЗЕР</button>
+        <button id="saveBtn" style="background:var(--green)">☁️ ЗБЕРЕГТИ</button>
+        <button id="delBtn" style="background:var(--red)">🗑️</button>
     </div>
 
-    <div id="c-container">
+    <div id="canvas-container">
         <canvas id="c"></canvas>
     </div>
-    <div id="status">Натисніть на лінію, щоб активувати точки</div>
+    <div id="status">Завантаження додатка...</div>
 
 <script>
 (function() {
-    let canvas, isDrawing = false, firstPoint = null;
-    let activePair = null;
+    // --- НАЛАШТУВАННЯ ---
+    const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
+    const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo';
+    const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
+    const SCOPES = "https://www.googleapis.com/auth/drive.file";
+
+    let canvas, tokenClient, gapiInited = false, gisInited = false;
+    let isDrawing = false, firstPoint = null, activePair = null;
 
     window.onload = () => {
         canvas = new fabric.Canvas('c', {
             width: window.innerWidth,
-            height: window.innerHeight - 90,
-            backgroundColor: '#111',
+            height: window.innerHeight - 100,
             enableRetinaScaling: true,
             selection: false
         });
 
-        // --- ОБРОБКА КЛІКІВ ---
-        canvas.on('mouse:down', (opt) => {
-            const target = canvas.findTarget(opt.e);
-
-            // Режим малювання
-            if (isDrawing) {
-                const pointer = canvas.getPointer(opt.e);
-                handleNewDimension(pointer);
-                return;
-            }
-
-            // Логіка активації
-            if (target && target.pair) {
-                activatePair(target.pair);
-            } else if (!target) {
-                deactivateAll();
-            }
-        });
-
-        function handleNewDimension(pointer) {
-            if (!firstPoint) {
-                firstPoint = pointer;
-                const dot = new fabric.Circle({
-                    left: pointer.x, top: pointer.y, radius: 5, fill: '#FF9500',
-                    originX: 'center', originY: 'center', selectable: false, id: 'temp'
-                });
-                canvas.add(dot);
-            } else {
-                createDimension(firstPoint, pointer);
-                canvas.getObjects('circle').forEach(o => { if(o.id === 'temp') canvas.remove(o); });
-                firstPoint = null;
-                isDrawing = false;
-                document.getElementById('drawBtn').classList.remove('active-btn');
-            }
-        }
-
-        function createDimension(p1Pos, p2Pos) {
-            const p1 = new fabric.Circle({
-                left: p1Pos.x, top: p1Pos.y, radius: 25, fill: 'rgba(48, 209, 88, 0.7)',
-                originX: 'center', originY: 'center', hasControls: false, 
-                selectable: false, visible: false, role: 'anchor'
-            });
-            const p2 = new fabric.Circle({
-                left: p2Pos.x, top: p2Pos.y, radius: 25, fill: 'rgba(48, 209, 88, 0.7)',
-                originX: 'center', originY: 'center', hasControls: false, 
-                selectable: false, visible: false, role: 'anchor'
-            });
-
-            const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {
-                stroke: '#FF9500', strokeWidth: 5, selectable: true, hasControls: false, perPixelTargetFind: true, targetFindTolerance: 15
-            });
-
-            const text = new fabric.Text('0.000', {
-                fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)',
-                originX: 'center', originY: 'center', selectable: true, hasControls: false, padding: 5
-            });
-
-            const pair = { p1, p2, line, text };
-            p1.pair = p2.pair = line.pair = text.pair = pair;
-
-            // Ручний ввід
-            text.on('mousedown', () => {
-                if(activePair === pair) {
-                    const val = prompt("Розмір (м):", text.text);
-                    if (val !== null) text.set('text', parseFloat(val).toFixed(3));
-                    canvas.renderAll();
-                }
-            });
-
-            canvas.add(line, text, p1, p2);
-            activatePair(pair);
-        }
-
-        function activatePair(pair) {
-            deactivateAll();
-            activePair = pair;
-            
-            // Робимо точки видимими та такими, що можна тягнути
-            pair.p1.set({ visible: true, selectable: true, evented: true });
-            pair.p2.set({ visible: true, selectable: true, evented: true });
-            pair.line.set('stroke', '#30D158'); // зелений колір активного
-            
-            // Виводимо на передній план
-            pair.p1.bringToFront();
-            pair.p2.bringToFront();
-            
-            canvas.setActiveObject(pair.line);
-            canvas.renderAll();
-            document.getElementById('status').innerText = "Розмір активний. Тягніть зелені точки.";
-        }
-
-        function deactivateAll() {
-            canvas.getObjects().forEach(obj => {
-                if (obj.role === 'anchor') {
-                    obj.set({ visible: false, selectable: false, evented: false });
-                }
-                if (obj.pair) obj.pair.line.set('stroke', '#FF9500');
-            });
-            activePair = null;
-            canvas.renderAll();
-            document.getElementById('status').innerText = "Оберіть лінію для редагування";
-        }
-
-        canvas.on('object:moving', (e) => {
-            if (e.target.pair) {
-                const p = e.target.pair;
-                p.line.set({ x1: p.p1.left, y1: p.p1.top, x2: p.p2.left, y2: p.p2.top });
-                p.text.set({ left: (p.p1.left + p.p2.left) / 2, top: (p.p1.top + p.p2.top) / 2 });
-                p.line.setCoords();
-                p.text.setCoords();
-            }
-        });
-
-        // Кнопки
+        // ПРИВ'ЯЗКА ПОДІЙ
         document.getElementById('drawBtn').onclick = function() {
             isDrawing = !isDrawing;
-            this.classList.toggle('active-btn', isDrawing);
-            if(isDrawing) deactivateAll();
+            this.classList.toggle('active', isDrawing);
+            document.getElementById('status').innerText = isDrawing ? "Вкажіть першу точку" : "Режим редагування";
         };
-        
-        document.getElementById('photoBtn').onclick = () => document.getElementById('fileInp').click();
-        
+
         document.getElementById('delBtn').onclick = () => {
-            if (activePair) {
-                canvas.remove(activePair.p1, activePair.p2, activePair.line, activePair.text);
-                activePair = null;
-                canvas.renderAll();
+            const active = canvas.getActiveObject();
+            if (active && active.pair) {
+                const p = active.pair;
+                canvas.remove(p.p1, p.p2, p.line, p.text);
+                canvas.discardActiveObject().renderAll();
             }
         };
+
+        document.getElementById('authBtn').onclick = () => tokenClient.requestAccessToken();
+        document.getElementById('laserBtn').onclick = connectLaser;
+        document.getElementById('saveBtn').onclick = saveToDrive;
 
         // ФОТО
         document.getElementById('fileInp').onchange = (e) => {
@@ -182,8 +82,154 @@
             });
             reader.readAsDataURL(e.target.files[0]);
         };
+
+        setupCanvasLogic();
+        document.getElementById('status').innerText = "Додаток готовий";
+    };
+
+    function setupCanvasLogic() {
+        canvas.on('mouse:down', (opt) => {
+            if (!isDrawing) return;
+            const pointer = canvas.getPointer(opt.e);
+
+            if (!firstPoint) {
+                firstPoint = pointer;
+                const dot = new fabric.Circle({
+                    left: pointer.x, top: pointer.y, radius: 5, fill: '#FF9500',
+                    originX: 'center', originY: 'center', selectable: false, id: 'tmp'
+                });
+                canvas.add(dot);
+            } else {
+                createDimension(firstPoint, pointer);
+                canvas.getObjects('circle').forEach(o => { if(o.id === 'tmp') canvas.remove(o); });
+                firstPoint = null;
+                isDrawing = false;
+                document.getElementById('drawBtn').classList.remove('active');
+            }
+        });
+
+        canvas.on('object:moving', (e) => {
+            if (e.target.pair) updateDimension(e.target.pair);
+        });
+    }
+
+    function createDimension(p1Pos, p2Pos) {
+        const p1 = new fabric.Circle({
+            left: p1Pos.x, top: p1Pos.y, radius: 20, fill: '#FF9500',
+            originX: 'center', originY: 'center', hasControls: false
+        });
+        const p2 = new fabric.Circle({
+            left: p2Pos.x, top: p2Pos.y, radius: 20, fill: '#FF9500',
+            originX: 'center', originY: 'center', hasControls: false
+        });
+        const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {
+            stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false
+        });
+        const text = new fabric.Text('0.000', {
+            fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)',
+            originX: 'center', originY: 'center', selectable: true, hasControls: false, padding: 5
+        });
+
+        const pair = { p1, p2, line, text };
+        p1.pair = p2.pair = text.pair = pair;
+
+        text.on('mousedown', () => {
+            const val = prompt("Введіть розмір (м):", text.text);
+            if (val !== null) text.set('text', parseFloat(val).toFixed(3));
+            canvas.renderAll();
+        });
+
+        // При кліку на будь-яку точку вона стає активною для лазера
+        p1.on('mousedown', () => activePair = pair);
+        p2.on('mousedown', () => activePair = pair);
+
+        canvas.add(line, text, p1, p2);
+        updateDimension(pair);
+        activePair = pair;
+    }
+
+    function updateDimension(pair) {
+        pair.line.set({ x1: pair.p1.left, y1: pair.p1.top, x2: pair.p2.left, y2: pair.p2.top });
+        pair.text.set({
+            left: (pair.p1.left + pair.p2.left) / 2,
+            top: (pair.p1.top + pair.p2.top) / 2
+        });
+        pair.line.setCoords();
+        pair.text.setCoords();
+        canvas.renderAll();
+    }
+
+    // --- BLUETOOTH ---
+    async function connectLaser() {
+        try {
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ namePrefix: 'Mileseey' }, { namePrefix: 'D5' }],
+                optionalServices: ['0000ff00-0000-1000-8000-00805f9b34fb']
+            });
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService('0000ff00-0000-1000-8000-00805f9b34fb');
+            const char = await service.getCharacteristic('0000ff01-0000-1000-8000-00805f9b34fb');
+            
+            await char.startNotifications();
+            char.addEventListener('characteristicvaluechanged', (e) => {
+                const data = new Uint8Array(e.target.value.buffer);
+                const dist = (data[3] * 65536 + data[4] * 256 + data[5]) / 1000;
+                if (activePair && dist > 0) {
+                    activePair.text.set('text', dist.toFixed(3));
+                    canvas.renderAll();
+                    document.getElementById('status').innerText = `Виміряно: ${dist.toFixed(3)} м`;
+                }
+            });
+            document.getElementById('laserBtn').style.background = '#30D158';
+            document.getElementById('status').innerText = "Лазер підключено";
+        } catch (e) { alert("Bluetooth: " + e.message); }
+    }
+
+    // --- GOOGLE DRIVE ---
+    async function saveToDrive() {
+        if (!gapiInited) return alert("Google API не завантажено");
+        const name = document.getElementById('objName').value || "unnamed";
+        document.getElementById('status').innerText = "Зберігаю у хмару...";
+
+        const dataUrl = canvas.toDataURL({ format: 'jpeg', quality: 0.8 });
+        const blob = await (await fetch(dataUrl)).blob();
+
+        const metadata = { name: `${name}.jpg`, mimeType: 'image/jpeg' };
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify(metadata)], {type: 'application/json'}));
+        form.append('file', blob);
+
+        try {
+            const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: new Headers({'Authorization': 'Bearer ' + gapi.client.getToken().access_token}),
+                body: form
+            });
+            if (resp.ok) {
+                document.getElementById('status').innerText = "✅ Збережено в Google Drive";
+                alert("Файл успішно збережено!");
+            }
+        } catch (e) { alert("Помилка збереження: " + e.message); }
+    }
+
+    // Ініціалізація Google
+    window.gapiLoaded = () => {
+        gapi.load('client', async () => {
+            await gapi.client.init({apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC]});
+            gapiInited = true;
+        });
+    };
+    window.gisLoaded = () => {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID, scope: SCOPES, callback: (resp) => {
+                if (resp.error) return;
+                document.getElementById('authBtn').innerText = "✅ OK";
+            }
+        });
     };
 })();
 </script>
+<script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+<script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
