@@ -39,6 +39,12 @@
         <div class="sidebar-header">
             <button id="authBtn">🔑 Google Drive</button>
             <button id="newProjectBtn" style="background:#3a3a3c; font-size:12px;">➕ НОВИЙ ОБ'ЄКТ</button>
+
+
+            <button id="drawModeBtn" style="flex: 1; background: #FF9500;">➕ РОЗМІР</button>
+            <button id="delObjBtn" style="flex: 0.3; background: #FF453A;">🗑️</button>
+
+            
         </div>
         <div id="project-list"></div>
         <div id="status">LaserApp: Очікування</div>
@@ -227,9 +233,126 @@
             canvas.setDimensions({ width: document.getElementById('canvas-wrapper').clientWidth, height: document.getElementById('canvas-wrapper').clientHeight });
         }
     });
+
+let isDrawingMode = false;
+    let firstPoint = null;
+
+    // Ініціалізація кнопок малювання
+    document.getElementById('drawModeBtn').onclick = function() {
+        isDrawingMode = !isDrawingMode;
+        this.style.background = isDrawingMode ? "#30D158" : "#FF9500";
+        canvas.selection = !isDrawingMode; // вимикаємо виділення рамкою в режимі малювання
+    };
+
+    document.getElementById('delObjBtn').onclick = deleteSelected;
+
+    function setupEngineeringLogic() {
+        canvas.on('mouse:down', function(opt) {
+            if (!isDrawingMode) return;
+            
+            // Отримуємо координати з урахуванням зуму та панорамування
+            const pointer = canvas.getPointer(opt.e);
+
+            if (!firstPoint) {
+                // Ставимо першу точку (тимчасову)
+                firstPoint = pointer;
+                const tempDot = new fabric.Circle({
+                    left: pointer.x, top: pointer.y, radius: 4, fill: '#FF9500',
+                    originX: 'center', originY: 'center', id: 'temp'
+                });
+                canvas.add(tempDot);
+            } else {
+                // Створюємо повноцінну розмірну лінію
+                createDimensionLine(firstPoint, pointer);
+                
+                // Очищення
+                canvas.getObjects().forEach(obj => { if(obj.id === 'temp') canvas.remove(obj); });
+                firstPoint = null;
+                // Залишаємо режим активним для наступної лінії
+            }
+        });
+
+        // Оновлення ліній при русі точок
+        canvas.on('object:moving', function(e) {
+            const p = e.target;
+            if (p.type === 'circle' && p.lineGroup) {
+                updateLinePos(p.lineGroup);
+            }
+        });
+    }
+
+    function createDimensionLine(p1, p2) {
+        // Створюємо вузли (точки), які можна рухати
+        const node1 = new fabric.Circle({
+            left: p1.x, top: p1.y, radius: 12, fill: 'rgba(255,149,0,0.6)',
+            originX: 'center', originY: 'center', hasControls: false, hasBorders: false
+        });
+        const node2 = new fabric.Circle({
+            left: p2.x, top: p2.y, radius: 12, fill: 'rgba(255,149,0,0.6)',
+            originX: 'center', originY: 'center', hasControls: false, hasBorders: false
+        });
+
+        // Лінія
+        const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
+            stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false
+        });
+
+        // Текст (розмір)
+        const text = new fabric.Text('0.000', {
+            fontSize: 20, fill: 'white', backgroundColor: 'black',
+            originX: 'center', originY: 'center', selectable: true, hasControls: false
+        });
+
+        // Групуємо логічно (не через fabric.Group, а через посилання)
+        const lineGroup = { node1, node2, line, text };
+        node1.lineGroup = node2.lineGroup = text.lineGroup = lineGroup;
+
+        // Клік на текст для ручного вводу
+        text.on('mousedown', () => {
+            const val = prompt("Введіть розмір (м):", text.text);
+            if (val !== null) text.set('text', val);
+            canvas.renderAll();
+        });
+
+        canvas.add(line, text, node1, node2);
+        updateLinePos(lineGroup);
+    }
+
+    function updateLinePos(lg) {
+        lg.line.set({ x1: lg.node1.left, y1: lg.node1.top, x2: lg.node2.left, y2: lg.node2.top });
+        
+        // Текст завжди посередині
+        lg.text.set({
+            left: (lg.node1.left + lg.node2.left) / 2,
+            top: (lg.node1.top + lg.node2.top) / 2
+        });
+        
+        lg.line.setCoords();
+        canvas.renderAll();
+    }
+
+    function deleteSelected() {
+        const active = canvas.getActiveObject();
+        if (!active) return;
+
+        if (active.lineGroup) {
+            const lg = active.lineGroup;
+            canvas.remove(lg.node1, lg.node2, lg.line, lg.text);
+        } else {
+            canvas.remove(active);
+        }
+        canvas.discardActiveObject().renderAll();
+    }
+
+    // Виклич setupEngineeringLogic() всередині initCanvas()
+
+
+
+    
 </script>
 
 <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
