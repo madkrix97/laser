@@ -3,42 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Laser Pro Cloud</title>
+    <title>Laser Pro Final</title>
     <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
     <style>
-        :root { --blue: #0A84FF; --green: #30D158; --orange: #FF9500; --red: #FF453A; }
+        :root { --blue: #0A84FF; --green: #30D158; --orange: #FF9500; --red: #FF453A; --purple: #5856D6; }
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; font-family: -apple-system, sans-serif; }
-        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; justify-content: center; border-bottom: 1px solid #333; flex-wrap: wrap; }
-        button { padding: 10px 14px; border-radius: 8px; border: none; background: var(--blue); color: white; font-weight: bold; font-size: 12px; cursor: pointer; }
+        .toolbar { padding: 8px; background: #1c1c1e; display: flex; gap: 6px; justify-content: center; border-bottom: 1px solid #333; flex-wrap: wrap; z-index: 100; }
+        button { padding: 10px; border-radius: 8px; border: none; background: var(--blue); color: white; font-weight: bold; font-size: 11px; cursor: pointer; }
         .active { background: var(--orange) !important; }
         #canvas-container { flex-grow: 1; position: relative; touch-action: none; background: #111; }
-        #status { font-size: 11px; color: #888; text-align: center; padding: 5px; background: #1c1c1e; border-top: 1px solid #333; }
-        input[type="text"] { background: #2c2c2e; color: white; border: 1px solid #444; border-radius: 6px; padding: 8px; width: 100px; }
+        #status { font-size: 11px; color: #888; text-align: center; padding: 4px; background: #1c1c1e; border-top: 1px solid #333; }
+        input[type="text"] { background: #2c2c2e; color: white; border: 1px solid #444; border-radius: 6px; padding: 6px; width: 90px; font-size: 12px; }
     </style>
 </head>
 <body>
 
     <div class="toolbar">
-        <button id="authBtn">🔑 ВХІД</button>
+        <button id="authBtn" style="background:#555">🔑 DRIVE ВХІД</button>
         <input type="text" id="objName" placeholder="Об'єкт">
-        <label for="fileInp" style="background:var(--blue); color:white; padding:10px; border-radius:8px; font-size:12px; font-weight:bold;">📷 ФОТО</label>
+        <label for="fileInp" style="background:var(--blue); color:white; padding:10px; border-radius:8px; font-size:11px; font-weight:bold; cursor:pointer;">📷 ФОТО</label>
         <input type="file" id="fileInp" style="display:none" accept="image/*">
         <button id="drawBtn">➕ РОЗМІР</button>
-        <button id="laserBtn" style="background:#5856D6">🔌 ЛАЗЕР</button>
+        <button id="laserBtn" style="background:var(--purple)">🔌 ЛАЗЕР</button>
         <button id="saveBtn" style="background:var(--green)">☁️ ЗБЕРЕГТИ</button>
         <button id="delBtn" style="background:var(--red)">🗑️</button>
+        <button id="resetZoom" style="background:#444">🔍 1:1</button>
     </div>
 
     <div id="canvas-container">
         <canvas id="c"></canvas>
     </div>
-    <div id="status">Завантаження додатка...</div>
+    <div id="status">Завантаження API...</div>
 
 <script>
 (function() {
-    // --- НАЛАШТУВАННЯ ---
     const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
-    const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo';
+    const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo'; 
     const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
     const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
@@ -53,93 +53,110 @@
             selection: false
         });
 
-        // ПРИВ'ЯЗКА ПОДІЙ
+        setupZoom();
+        
         document.getElementById('drawBtn').onclick = function() {
             isDrawing = !isDrawing;
             this.classList.toggle('active', isDrawing);
-            document.getElementById('status').innerText = isDrawing ? "Вкажіть першу точку" : "Режим редагування";
         };
 
         document.getElementById('delBtn').onclick = () => {
             const active = canvas.getActiveObject();
             if (active && active.pair) {
-                const p = active.pair;
-                canvas.remove(p.p1, p.p2, p.line, p.text);
+                canvas.remove(active.pair.p1, active.pair.p2, active.pair.line, active.pair.text);
                 canvas.discardActiveObject().renderAll();
             }
         };
 
-        document.getElementById('authBtn').onclick = () => tokenClient.requestAccessToken();
+        document.getElementById('resetZoom').onclick = () => {
+            canvas.setZoom(1);
+            canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+            canvas.renderAll();
+        };
+
+        document.getElementById('authBtn').onclick = () => { if (tokenClient) tokenClient.requestAccessToken(); };
         document.getElementById('laserBtn').onclick = connectLaser;
         document.getElementById('saveBtn').onclick = saveToDrive;
 
-        // ФОТО
         document.getElementById('fileInp').onchange = (e) => {
             const reader = new FileReader();
             reader.onload = (f) => fabric.Image.fromURL(f.target.result, (img) => {
                 const r = Math.min(canvas.width/img.width, canvas.height/img.height);
-                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r, originX:'left', originY:'top'});
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), { scaleX: r, scaleY: r });
             });
             reader.readAsDataURL(e.target.files[0]);
         };
 
         setupCanvasLogic();
-        document.getElementById('status').innerText = "Додаток готовий";
     };
 
+    // --- ЗУМ ТА ПЕРЕМІЩЕННЯ ---
+    function setupZoom() {
+        canvas.on('mouse:wheel', function(opt) {
+            let delta = opt.e.deltaY;
+            let zoom = canvas.getZoom() * (0.999 ** delta);
+            if (zoom > 20) zoom = 20; if (zoom < 0.01) zoom = 0.01;
+            canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+            opt.e.preventDefault(); opt.e.stopPropagation();
+        });
+
+        canvas.on('mouse:down', function(opt) {
+            if (!isDrawing && !canvas.findTarget(opt.e)) {
+                this.isDragging = true;
+                this.lastPosX = opt.e.clientX || opt.e.touches[0].clientX;
+                this.lastPosY = opt.e.clientY || opt.e.touches[0].clientY;
+            }
+        });
+        canvas.on('mouse:move', function(opt) {
+            if (this.isDragging) {
+                let e = opt.e;
+                let clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+                let clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+                let vpt = this.viewportTransform;
+                vpt[4] += clientX - this.lastPosX;
+                vpt[5] += clientY - this.lastPosY;
+                this.requestRenderAll();
+                this.lastPosX = clientX; this.lastPosY = clientY;
+            }
+        });
+        canvas.on('mouse:up', function() { this.isDragging = false; });
+    }
+
+    // --- МАЛЮВАННЯ ТА ЛОГІКА ТОЧОК ---
     function setupCanvasLogic() {
         canvas.on('mouse:down', (opt) => {
             if (!isDrawing) return;
             const pointer = canvas.getPointer(opt.e);
-
             if (!firstPoint) {
                 firstPoint = pointer;
-                const dot = new fabric.Circle({
-                    left: pointer.x, top: pointer.y, radius: 5, fill: '#FF9500',
-                    originX: 'center', originY: 'center', selectable: false, id: 'tmp'
-                });
+                const dot = new fabric.Circle({ left: pointer.x, top: pointer.y, radius: 5, fill: '#FF9500', originX: 'center', originY: 'center', selectable: false, id: 'tmp' });
                 canvas.add(dot);
             } else {
                 createDimension(firstPoint, pointer);
                 canvas.getObjects('circle').forEach(o => { if(o.id === 'tmp') canvas.remove(o); });
-                firstPoint = null;
-                isDrawing = false;
+                firstPoint = null; isDrawing = false;
                 document.getElementById('drawBtn').classList.remove('active');
             }
         });
-
-        canvas.on('object:moving', (e) => {
-            if (e.target.pair) updateDimension(e.target.pair);
-        });
+        canvas.on('object:moving', (e) => { if (e.target.pair) updateDimension(e.target.pair); });
     }
 
     function createDimension(p1Pos, p2Pos) {
-        const p1 = new fabric.Circle({
-            left: p1Pos.x, top: p1Pos.y, radius: 20, fill: '#FF9500',
-            originX: 'center', originY: 'center', hasControls: false
-        });
-        const p2 = new fabric.Circle({
-            left: p2Pos.x, top: p2Pos.y, radius: 20, fill: '#FF9500',
-            originX: 'center', originY: 'center', hasControls: false
-        });
-        const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {
-            stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false
-        });
-        const text = new fabric.Text('0.000', {
-            fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)',
-            originX: 'center', originY: 'center', selectable: true, hasControls: false, padding: 5
-        });
-
+        const p1 = new fabric.Circle({ left: p1Pos.x, top: p1Pos.y, radius: 20, fill: '#FF9500', originX: 'center', originY: 'center', hasControls: false });
+        const p2 = new fabric.Circle({ left: p2Pos.x, top: p2Pos.y, radius: 20, fill: '#FF9500', originX: 'center', originY: 'center', hasControls: false });
+        const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], { stroke: '#FF9500', strokeWidth: 3, selectable: false });
+        const text = new fabric.Text('0.000', { fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)', originX: 'center', originY: 'center', selectable: true, hasControls: false });
+        
         const pair = { p1, p2, line, text };
         p1.pair = p2.pair = text.pair = pair;
-
+        
         text.on('mousedown', () => {
-            const val = prompt("Введіть розмір (м):", text.text);
-            if (val !== null) text.set('text', parseFloat(val).toFixed(3));
+            const val = prompt("Метри:", text.text);
+            if (val) text.set('text', parseFloat(val).toFixed(3));
             canvas.renderAll();
         });
-
-        // При кліку на будь-яку точку вона стає активною для лазера
+        
+        // Визначаємо активну пару при дотику до точки
         p1.on('mousedown', () => activePair = pair);
         p2.on('mousedown', () => activePair = pair);
 
@@ -150,16 +167,11 @@
 
     function updateDimension(pair) {
         pair.line.set({ x1: pair.p1.left, y1: pair.p1.top, x2: pair.p2.left, y2: pair.p2.top });
-        pair.text.set({
-            left: (pair.p1.left + pair.p2.left) / 2,
-            top: (pair.p1.top + pair.p2.top) / 2
-        });
-        pair.line.setCoords();
-        pair.text.setCoords();
+        pair.text.set({ left: (pair.p1.left + pair.p2.left) / 2, top: (pair.p1.top + pair.p2.top) / 2 });
         canvas.renderAll();
     }
 
-    // --- BLUETOOTH ---
+    // --- BLUETOOTH ЛАЗЕР ---
     async function connectLaser() {
         try {
             const device = await navigator.bluetooth.requestDevice({
@@ -177,54 +189,46 @@
                 if (activePair && dist > 0) {
                     activePair.text.set('text', dist.toFixed(3));
                     canvas.renderAll();
-                    document.getElementById('status').innerText = `Виміряно: ${dist.toFixed(3)} м`;
+                    document.getElementById('status').innerText = `Отримано: ${dist.toFixed(3)} м`;
                 }
             });
-            document.getElementById('laserBtn').style.background = '#30D158';
+            document.getElementById('laserBtn').style.background = 'var(--green)';
             document.getElementById('status').innerText = "Лазер підключено";
         } catch (e) { alert("Bluetooth: " + e.message); }
     }
 
     // --- GOOGLE DRIVE ---
     async function saveToDrive() {
-        if (!gapiInited) return alert("Google API не завантажено");
-        const name = document.getElementById('objName').value || "unnamed";
-        document.getElementById('status').innerText = "Зберігаю у хмару...";
-
+        if (!gapi.client.getToken()) return alert("Спочатку натисніть DRIVE ВХІД");
+        document.getElementById('status').innerText = "Зберігаю...";
         const dataUrl = canvas.toDataURL({ format: 'jpeg', quality: 0.8 });
         const blob = await (await fetch(dataUrl)).blob();
-
-        const metadata = { name: `${name}.jpg`, mimeType: 'image/jpeg' };
+        const metadata = { name: (document.getElementById('objName').value || 'measure') + '.jpg', mimeType: 'image/jpeg' };
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], {type: 'application/json'}));
         form.append('file', blob);
 
         try {
-            const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
                 method: 'POST',
                 headers: new Headers({'Authorization': 'Bearer ' + gapi.client.getToken().access_token}),
                 body: form
             });
-            if (resp.ok) {
-                document.getElementById('status').innerText = "✅ Збережено в Google Drive";
-                alert("Файл успішно збережено!");
-            }
-        } catch (e) { alert("Помилка збереження: " + e.message); }
+            document.getElementById('status').innerText = "✅ Збережено в Drive!";
+            alert("Збережено!");
+        } catch (e) { alert(e.message); }
     }
 
-    // Ініціалізація Google
     window.gapiLoaded = () => {
         gapi.load('client', async () => {
             await gapi.client.init({apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC]});
             gapiInited = true;
+            document.getElementById('status').innerText = "Google API готовий";
         });
     };
     window.gisLoaded = () => {
         tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: CLIENT_ID, scope: SCOPES, callback: (resp) => {
-                if (resp.error) return;
-                document.getElementById('authBtn').innerText = "✅ OK";
-            }
+            client_id: CLIENT_ID, scope: SCOPES, callback: (r) => { if(!r.error) document.getElementById('authBtn').innerText = "✅ ВХІД OK"; }
         });
     };
 })();
