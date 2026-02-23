@@ -3,278 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Laser Pro: Cloud Sync & Edit</title>
-    <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
+    <title>Laser Pro - Менеджер проектів</title>
     <style>
-        :root { --blue: #0A84FF; --green: #30D158; --orange: #FF9500; --red: #FF453A; --purple: #5856D6; }
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; font-family: -apple-system, sans-serif; }
-        .toolbar { padding: 8px; background: #1c1c1e; display: flex; gap: 6px; justify-content: center; border-bottom: 1px solid #333; flex-wrap: wrap; z-index: 100; }
-        button { padding: 10px; border-radius: 8px; border: none; background: var(--blue); color: white; font-weight: bold; font-size: 11px; cursor: pointer; }
-        .active { background: var(--orange) !important; }
-        #canvas-container { flex-grow: 1; position: relative; touch-action: none; background: #111; }
-        #status { font-size: 11px; color: #888; text-align: center; padding: 4px; background: #1c1c1e; border-top: 1px solid #333; }
-        input[type="text"] { background: #2c2c2e; color: white; border: 1px solid #444; border-radius: 6px; padding: 8px; width: 110px; font-size: 12px; }
+        body { margin: 0; font-family: -apple-system, sans-serif; display: flex; height: 100vh; background: #000; color: white; overflow: hidden; }
+        
+        /* Ліва панель */
+        #sidebar { width: 280px; background: #1c1c1e; border-right: 1px solid #333; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 15px; border-bottom: 1px solid #333; }
+        #project-list { flex-grow: 1; overflow-y: auto; padding: 10px; }
+        
+        .project-item { 
+            padding: 15px; border-radius: 10px; margin-bottom: 10px; cursor: pointer; 
+            background: #2c2c2e; border: 1px solid transparent; transition: all 0.2s;
+        }
+        .project-item:hover { background: #3a3a3c; }
+        .project-item.active { border-color: #0A84FF; background: #3a3a3c; }
+        .project-name { font-weight: bold; font-size: 14px; display: block; }
+
+        /* Основна зона */
+        #main-view { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; background: #111; }
+        #main-image { max-width: 95%; max-height: 95%; border-radius: 4px; display: none; object-fit: contain; }
+        .no-selection { color: #666; font-size: 16px; text-align: center; padding: 20px; }
+
+        button { width: 100%; padding: 12px; border-radius: 8px; border: none; background: #0A84FF; color: white; font-weight: bold; cursor: pointer; }
+        #status { font-size: 11px; color: #888; padding: 8px; text-align: center; background: #1c1c1e; border-top: 1px solid #333; }
+        
+        .loader { border: 3px solid #333; border-top: 3px solid #0A84FF; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <div class="toolbar">
-        <button id="authBtn" style="background:#555">🔑 ВХІД</button>
-        <input type="text" id="objName" placeholder="Назва об'єкта">
-        <button id="loadDriveBtn" style="background:#444">📂 ВІДКРИТИ</button>
-        <label for="fileInp" style="background:var(--blue); color:white; padding:10px; border-radius:8px; font-size:11px; font-weight:bold; cursor:pointer;">📷 ФОТО</label>
-        <input type="file" id="fileInp" style="display:none" accept="image/*">
-        <button id="drawBtn">➕ РОЗМІР</button>
-        <button id="laserBtn" style="background:var(--purple)">🔌 ЛАЗЕР</button>
-        <button id="saveBtn" style="background:var(--green)">☁️ ЗБЕРЕГТИ</button>
-        <button id="delBtn" style="background:var(--red)">🗑️</button>
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <button id="authBtn">🔑 Увійти в Google Drive</button>
+        </div>
+        <div id="project-list">
+            <div class="no-selection">Натисніть "Увійти", щоб завантажити проекти</div>
+        </div>
+        <div class="loader" id="listLoader"></div>
+        <div id="status">Очікування авторизації...</div>
     </div>
 
-    <div id="canvas-container">
-        <canvas id="c"></canvas>
+    <div id="main-view">
+        <div id="no-project-msg" class="no-selection">Оберіть проект зі списку ліворуч,<br>щоб побачити основне зображення</div>
+        <img id="main-image" alt="Завантаження...">
     </div>
-    <div id="status">Завантаження...</div>
 
 <script>
-(function() {
     const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
-    const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo'; 
+    const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo';
     const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
-    const SCOPES = "https://www.googleapis.com/auth/drive.file";
+    const SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly";
 
-    let canvas, tokenClient, gapiInited = false;
-    let isDrawing = false, firstPoint = null, activePair = null;
+    let tokenClient;
+    let accessToken = null;
 
-    window.onload = () => {
-        canvas = new fabric.Canvas('c', {
-            width: window.innerWidth,
-            height: window.innerHeight - 100,
-            enableRetinaScaling: true,
-            selection: false
+    // Ініціалізація Google API
+    function gapiLoaded() {
+        gapi.load('client', async () => {
+            await gapi.client.init({apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC]});
         });
+    }
 
-        setupZoomAndPan();
-        setupCanvasLogic();
+    function gisLoaded() {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID,
+            scope: SCOPES,
+            callback: (res) => {
+                if (res.error) return;
+                accessToken = res.access_token;
+                document.getElementById('authBtn').innerText = "✅ Google Drive Підключено";
+                loadProjects();
+            },
+        });
+    }
 
-        // Кнопки
-        document.getElementById('authBtn').onclick = () => tokenClient.requestAccessToken();
-        document.getElementById('drawBtn').onclick = function() {
-            isDrawing = !isDrawing;
-            this.classList.toggle('active', isDrawing);
-        };
-        document.getElementById('laserBtn').onclick = connectLaser;
-        document.getElementById('saveBtn').onclick = saveToDrive;
-        document.getElementById('loadDriveBtn').onclick = loadFromDrive;
-        document.getElementById('delBtn').onclick = deleteActive;
+    document.getElementById('authBtn').onclick = () => tokenClient.requestAccessToken();
 
-        document.getElementById('fileInp').onchange = (e) => {
-            const reader = new FileReader();
-            reader.onload = (f) => fabric.Image.fromURL(f.target.result, (img) => {
-                const r = Math.min(canvas.width/img.width, canvas.height/img.height);
-                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), { scaleX: r, scaleY: r });
+    // Завантаження списку папок
+    async function loadProjects() {
+        const listEl = document.getElementById('project-list');
+        const loader = document.getElementById('listLoader');
+        listEl.innerHTML = "";
+        loader.style.display = "block";
+        
+        try {
+            const response = await gapi.client.drive.files.list({
+                q: "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                fields: 'files(id, name)',
+                orderBy: 'name'
             });
-            reader.readAsDataURL(e.target.files[0]);
-        };
-    };
 
-    // --- ЛОГІКА МАЛЮВАННЯ ---
-    function setupCanvasLogic() {
-        canvas.on('mouse:down', (opt) => {
-            if (!isDrawing) return;
-            const pointer = canvas.getPointer(opt.e);
-            if (!firstPoint) {
-                firstPoint = pointer;
-                const dot = new fabric.Circle({ left: pointer.x, top: pointer.y, radius: 5, fill: '#FF9500', originX: 'center', originY: 'center', selectable: false, id: 'tmp' });
-                canvas.add(dot);
+            const folders = response.result.files;
+            loader.style.display = "none";
+
+            if (folders && folders.length > 0) {
+                folders.forEach(folder => {
+                    const div = document.createElement('div');
+                    div.className = 'project-item';
+                    div.innerHTML = `<span class="project-name">${folder.name}</span>`;
+                    div.onclick = () => selectProject(folder.id, div);
+                    listEl.appendChild(div);
+                });
+                document.getElementById('status').innerText = `Знайдено проектів: ${folders.length}`;
             } else {
-                createDimension(firstPoint, pointer);
-                canvas.getObjects('circle').forEach(o => { if(o.id === 'tmp') canvas.remove(o); });
-                firstPoint = null; isDrawing = false;
-                document.getElementById('drawBtn').classList.remove('active');
+                listEl.innerHTML = "<div class='no-selection'>Папок не знайдено</div>";
             }
-        });
-        canvas.on('object:moving', (e) => { if (e.target.pair) updateDimension(e.target.pair); });
-    }
-
-    function createDimension(p1Pos, p2Pos, val = "0.000") {
-        const p1 = new fabric.Circle({ left: p1Pos.x, top: p1Pos.y, radius: 20, fill: '#FF9500', originX: 'center', originY: 'center', hasControls: false, role: 'p1' });
-        const p2 = new fabric.Circle({ left: p2Pos.x, top: p2Pos.y, radius: 20, fill: '#FF9500', originX: 'center', originY: 'center', hasControls: false, role: 'p2' });
-        const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], { stroke: '#FF9500', strokeWidth: 3, selectable: false, role: 'line' });
-        const text = new fabric.Text(val, { fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)', originX: 'center', originY: 'center', selectable: true, hasControls: false, role: 'text' });
-        
-        const pair = { p1, p2, line, text };
-        p1.pair = p2.pair = text.pair = pair;
-        
-        text.on('mousedown', () => {
-            const v = prompt("Метри:", text.text);
-            if (v) { text.set('text', parseFloat(v).toFixed(3)); canvas.renderAll(); }
-        });
-        p1.on('mousedown', () => activePair = pair);
-        p2.on('mousedown', () => activePair = pair);
-
-        canvas.add(line, text, p1, p2);
-        updateDimension(pair);
-        activePair = pair;
-    }
-
-    function updateDimension(pair) {
-        pair.line.set({ x1: pair.p1.left, y1: pair.p1.top, x2: pair.p2.left, y2: pair.p2.top });
-        pair.text.set({ left: (pair.p1.left + pair.p2.left) / 2, top: (pair.p1.top + pair.p2.top) / 2 });
-        pair.line.setCoords(); pair.text.setCoords();
-        canvas.renderAll();
-    }
-
-    function deleteActive() {
-        const active = canvas.getActiveObject();
-        if (active && active.pair) {
-            canvas.remove(active.pair.p1, active.pair.p2, active.pair.line, active.pair.text);
-            canvas.discardActiveObject().renderAll();
+        } catch (err) {
+            loader.style.display = "none";
+            document.getElementById('status').innerText = "Помилка завантаження списку";
         }
     }
 
-    // --- ZOOM & PAN ---
-    function setupZoomAndPan() {
-        canvas.on('mouse:wheel', (opt) => {
-            let zoom = canvas.getZoom() * (0.999 ** opt.e.deltaY);
-            if (zoom > 20) zoom = 20; if (zoom < 0.05) zoom = 0.05;
-            canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
-            opt.e.preventDefault();
-        });
-        canvas.on('mouse:down', function(opt) {
-            if (!isDrawing && !canvas.findTarget(opt.e)) {
-                this.isDragging = true;
-                this.lastPosX = opt.e.clientX || opt.e.touches[0].clientX;
-                this.lastPosY = opt.e.clientY || opt.e.touches[0].clientY;
-            }
-        });
-        canvas.on('mouse:move', function(opt) {
-            if (this.isDragging) {
-                let e = opt.e;
-                let clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
-                let clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
-                this.viewportTransform[4] += clientX - this.lastPosX;
-                this.viewportTransform[5] += clientY - this.lastPosY;
-                this.requestRenderAll();
-                this.lastPosX = clientX; this.lastPosY = clientY;
-            }
-        });
-        canvas.on('mouse:up', function() { this.isDragging = false; });
-    }
-
-    // --- BLUETOOTH ---
-    async function connectLaser() {
+    // Завантаження основного зображення проекту
+    async function selectProject(folderId, element) {
+        document.querySelectorAll('.project-item').forEach(el => el.classList.remove('active'));
+        element.classList.add('active');
+        
+        const imgEl = document.getElementById('main-image');
+        const msgEl = document.getElementById('no-project-msg');
+        
+        imgEl.style.display = "none";
+        msgEl.innerText = "Завантаження фото...";
+        msgEl.style.display = "block";
+        
         try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'Mileseey' }, { namePrefix: 'D5' }],
-                optionalServices: ['0000ff00-0000-1000-8000-00805f9b34fb']
+            const response = await gapi.client.drive.files.list({
+                q: `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`,
+                fields: 'files(id, name)',
+                pageSize: 1
             });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService('0000ff00-0000-1000-8000-00805f9b34fb');
-            const char = await service.getCharacteristic('0000ff01-0000-1000-8000-00805f9b34fb');
-            await char.startNotifications();
-            char.addEventListener('characteristicvaluechanged', (e) => {
-                const data = new Uint8Array(e.target.value.buffer);
-                const dist = (data[3] * 65536 + data[4] * 256 + data[5]) / 1000;
-                if (activePair && dist > 0) {
-                    activePair.text.set('text', dist.toFixed(3));
-                    canvas.renderAll();
-                    document.getElementById('status').innerText = `Лазер: ${dist.toFixed(3)} м`;
-                }
-            });
-            document.getElementById('laserBtn').style.background = 'var(--green)';
-            document.getElementById('status').innerText = "Лазер підключено";
-        } catch (e) { alert("Bluetooth: " + e.message); }
+
+            const files = response.result.files;
+
+            if (files && files.length > 0) {
+                // Отримуємо файл як Blob через AccessToken для обходу CORS/Privacy
+                const fileId = files[0].id;
+                const fetchRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const blob = await fetchRes.blob();
+                const url = URL.createObjectURL(blob);
+                
+                imgEl.src = url;
+                imgEl.onload = () => {
+                    imgEl.style.display = "block";
+                    msgEl.style.display = "none";
+                    document.getElementById('status').innerText = `Проект: ${element.innerText}`;
+                };
+            } else {
+                msgEl.innerText = "У цій папці немає зображень";
+            }
+        } catch (err) {
+            msgEl.innerText = "Не вдалося завантажити зображення";
+        }
     }
-
-    // --- DRIVE SYNC (Folders & Edit) ---
-    async function getOrCreateFolder(name) {
-        const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}`, {
-            headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }
-        });
-        const data = await res.json();
-        if (data.files.length > 0) return data.files[0].id;
-        const create = await fetch('https://www.googleapis.com/drive/v3/files', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, mimeType: 'application/vnd.google-apps.folder' })
-        });
-        return (await create.json()).id;
-    }
-
-    async function saveToDrive() {
-        const token = gapi.client.getToken();
-        if (!token) return alert("Увійдіть в Google!");
-        const objName = document.getElementById('objName').value || "Project";
-        document.getElementById('status').innerText = "Синхронізація...";
-
-        try {
-            const folderId = await getOrCreateFolder(objName);
-            // Збереження JPG
-            const imgBlob = await (await fetch(canvas.toDataURL({format:'jpeg', quality:0.8}))).blob();
-            await uploadToDrive(imgBlob, `${objName}.jpg`, 'image/jpeg', folderId);
-            // Збереження JSON для редагування
-            const state = [];
-            canvas.getObjects().forEach(obj => {
-                if(obj.pair && obj.role === 'line') {
-                    state.push({
-                        p1: {x: obj.pair.p1.left, y: obj.pair.p1.top},
-                        p2: {x: obj.pair.p2.left, y: obj.pair.p2.top},
-                        val: obj.pair.text.text
-                    });
-                }
-            });
-            const jsonBlob = new Blob([JSON.stringify(state)], {type:'application/json'});
-            await uploadToDrive(jsonBlob, `${objName}_data.json`, 'application/json', folderId);
-            document.getElementById('status').innerText = "✅ Об'єкт збережено!";
-        } catch (e) { alert(e.message); }
-    }
-
-    async function uploadToDrive(blob, name, mime, folderId) {
-        const meta = { name: name, mimeType: mime, parents: [folderId] };
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(meta)], {type: 'application/json'}));
-        form.append('file', blob);
-        return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token },
-            body: form
-        });
-    }
-
-    async function loadFromDrive() {
-        const objName = document.getElementById('objName').value;
-        if (!objName) return alert("Введіть назву об'єкта");
-        document.getElementById('status').innerText = "Пошук...";
-        const q = `name='${objName}_data.json' and trashed=false`;
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`, {
-            headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }
-        });
-        const data = await res.json();
-        if (data.files.length > 0) {
-            const file = await fetch(`https://www.googleapis.com/drive/v3/files/${data.files[0].id}?alt=media`, {
-                headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }
-            });
-            const state = await file.json();
-            state.forEach(s => createDimension(s.p1, s.p2, s.val));
-            document.getElementById('status').innerText = "📂 Завантажено";
-        } else alert("Не знайдено");
-    }
-
-    window.gapiLoaded = () => {
-        gapi.load('client', async () => {
-            await gapi.client.init({apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC]});
-            gapiInited = true;
-            document.getElementById('status').innerText = "API OK";
-        });
-    };
-    window.gisLoaded = () => {
-        tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: CLIENT_ID, scope: SCOPES, callback: (r) => { if(!r.error) document.getElementById('authBtn').innerText = "✅ OK"; }
-        });
-    };
-})();
 </script>
+
 <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
