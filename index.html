@@ -3,27 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Laser Pro Fix</title>
+    <title>Laser Fixed</title>
     <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; }
-        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 10px; justify-content: center; z-index: 5; }
-        button { padding: 12px 18px; border-radius: 10px; border: none; font-weight: bold; font-size: 14px; cursor: pointer; color: white; background: #007AFF; }
-        .active { background: #FF9500 !important; border: 2px solid white; }
-        #cv-container { flex-grow: 1; background: #111; touch-action: none; position: relative; }
+        body { margin: 0; background: #000; color: white; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        .nav { padding: 10px; background: #222; display: flex; gap: 10px; justify-content: center; }
+        button { padding: 15px; border-radius: 10px; border: none; background: #007AFF; color: white; font-weight: bold; }
+        .active { background: #FF9500 !important; }
+        #wrapper { flex-grow: 1; position: relative; }
     </style>
 </head>
 <body>
 
-<div class="toolbar">
-    <button id="btn-img">📷 ФОТО</button>
-    <button id="btn-draw">➕ РОЗМІР</button>
-    <button id="btn-del" style="background:#FF3B30">🗑️</button>
-    <input type="file" id="inp-img" style="display:none" accept="image/*">
+<div class="nav">
+    <button id="drawBtn">➕ РОЗМІР</button>
+    <button id="photoBtn">📷 ФОТО</button>
+    <button id="delBtn" style="background:red">🗑️</button>
+    <input type="file" id="fileInp" style="display:none" accept="image/*">
 </div>
 
-<div id="cv-container">
-    <canvas id="canvas"></canvas>
+<div id="wrapper">
+    <canvas id="c"></canvas>
 </div>
 
 <script>
@@ -31,112 +31,74 @@
     let canvas, isDrawing = false, firstPoint = null;
 
     window.onload = () => {
-        // Налаштування канвасу для iPhone
-        canvas = new fabric.Canvas('canvas', {
+        // Примусове скидання кешу канвасу
+        canvas = new fabric.Canvas('c', {
             width: window.innerWidth,
-            height: window.innerHeight - 70,
+            height: window.innerHeight - 80,
             backgroundColor: '#111',
-            selection: false,
-            allowTouchScrolling: false,
-            enableRetinaScaling: true
+            enableRetinaScaling: true,
+            fireRightClick: true
         });
 
-        // Виправлення координат для тач-скрінів
-        const getMouse = (e) => canvas.getPointer(e.e || e);
-
-        // --- КНОПКИ ---
-        document.getElementById('btn-img').onclick = () => document.getElementById('inp-img').click();
-        
-        document.getElementById('btn-draw').onclick = function() {
+        document.getElementById('photoBtn').onclick = () => document.getElementById('fileInp').click();
+        document.getElementById('drawBtn').onclick = function() {
             isDrawing = !isDrawing;
             this.classList.toggle('active', isDrawing);
         };
 
-        document.getElementById('btn-del').onclick = () => {
-            const active = canvas.getActiveObject();
-            if (active) {
-                if (active._objects) { // якщо це група
-                    canvas.remove(active);
-                } else {
-                    canvas.remove(active);
-                }
-                canvas.discardActiveObject().renderAll();
-            }
-        };
+        // ЛОГІКА ТОЧОК
+        canvas.on('mouse:down', (opt) => {
+            if (!isDrawing) return;
+            const pointer = canvas.getPointer(opt.e);
 
-        // --- ЗАВАНТАЖЕННЯ ФОТО ---
-        document.getElementById('inp-img').onchange = (e) => {
+            if (!firstPoint) {
+                firstPoint = pointer;
+                // Малюємо початкову точку
+                const p1 = new fabric.Circle({
+                    left: pointer.x, top: pointer.y, radius: 12, fill: 'yellow',
+                    originX: 'center', originY: 'center', hasControls: false, id: 'p1'
+                });
+                canvas.add(p1);
+            } else {
+                createLine(firstPoint, pointer);
+                firstPoint = null;
+                isDrawing = false;
+                document.getElementById('drawBtn').classList.remove('active');
+            }
+        });
+
+        function createLine(start, end) {
+            const line = new fabric.Line([start.x, start.y, end.x, end.y], {
+                stroke: 'yellow', strokeWidth: 4, selectable: false
+            });
+
+            const p2 = new fabric.Circle({
+                left: end.x, top: end.y, radius: 12, fill: 'yellow',
+                originX: 'center', originY: 'center', hasControls: false
+            });
+
+            const text = new fabric.Text('0.00m', {
+                left: (start.x + end.x) / 2, top: (start.y + end.y) / 2,
+                fontSize: 20, fill: 'white', backgroundColor: 'black',
+                originX: 'center', originY: 'center', selectable: true
+            });
+
+            canvas.add(line, p2, text);
+            canvas.renderAll();
+        }
+
+        document.getElementById('fileInp').onchange = (e) => {
             const reader = new FileReader();
             reader.onload = (f) => {
                 fabric.Image.fromURL(f.target.result, (img) => {
-                    const scale = Math.min(canvas.width/img.width, canvas.height/img.height);
+                    const ratio = Math.min(canvas.width/img.width, canvas.height/img.height);
                     canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
-                        scaleX: scale, scaleY: scale, originX: 'left', originY: 'top'
+                        scaleX: ratio, scaleY: ratio
                     });
                 });
             };
             reader.readAsDataURL(e.target.files[0]);
         };
-
-        // --- ЛОГІКА МАЛЮВАННЯ (З КІНЦЕВИМИ ТОЧКАМИ) ---
-        canvas.on('mouse:down', (opt) => {
-            if (!isDrawing) return;
-            const pointer = getMouse(opt);
-
-            if (!firstPoint) {
-                firstPoint = pointer;
-                // Тимчасова точка
-                const dot = new fabric.Circle({
-                    left: pointer.x, top: pointer.y, radius: 8, fill: 'red',
-                    originX: 'center', originY: 'center', selectable: false, id: 'temp-dot'
-                });
-                canvas.add(dot);
-            } else {
-                createMeasurement(firstPoint, pointer);
-                canvas.getObjects('circle').forEach(obj => {
-                    if(obj.id === 'temp-dot') canvas.remove(obj);
-                });
-                firstPoint = null;
-                isDrawing = false;
-                document.getElementById('btn-draw').classList.remove('active');
-            }
-        });
-
-        function createMeasurement(p1, p2) {
-            // Сама лінія
-            const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
-                stroke: '#FFFF00', strokeWidth: 4, originX: 'center', originY: 'center'
-            });
-
-            // Кінцеві точки (вузли)
-            const c1 = new fabric.Circle({
-                left: p1.x, top: p1.y, radius: 10, fill: '#FFFF00',
-                originX: 'center', originY: 'center', hasControls: false
-            });
-            const c2 = new fabric.Circle({
-                left: p2.x, top: p2.y, radius: 10, fill: '#FFFF00',
-                originX: 'center', originY: 'center', hasControls: false
-            });
-
-            // Текст (по центру)
-            const text = new fabric.Text('0.000', {
-                left: (p1.x + p2.x) / 2, top: (p1.y + p2.y) / 2,
-                fontSize: 22, fill: 'white', backgroundColor: 'black',
-                originX: 'center', originY: 'center', fontWeight: 'bold'
-            });
-
-            // Групуємо все в один об'єкт
-            const group = new fabric.Group([line, c1, c2, text], {
-                hasControls: true, 
-                cornerSize: 12,
-                transparentCorners: false,
-                cornerColor: '#007AFF'
-            });
-
-            canvas.add(group);
-            canvas.setActiveObject(group);
-            canvas.renderAll();
-        }
     };
 })();
 </script>
