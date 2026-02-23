@@ -246,38 +246,57 @@ let isDrawingMode = false;
 
     document.getElementById('delObjBtn').onclick = deleteSelected;
 
+// Оновлена логіка натискань для усунення конфлікту
     function setupEngineeringLogic() {
         canvas.on('mouse:down', function(opt) {
-            if (!isDrawingMode) return;
-            
-            // Отримуємо координати з урахуванням зуму та панорамування
             const pointer = canvas.getPointer(opt.e);
+            const target = canvas.findTarget(opt.e);
 
-            if (!firstPoint) {
-                // Ставимо першу точку (тимчасову)
-                firstPoint = pointer;
-                const tempDot = new fabric.Circle({
-                    left: pointer.x, top: pointer.y, radius: 4, fill: '#FF9500',
-                    originX: 'center', originY: 'center', id: 'temp'
-                });
-                canvas.add(tempDot);
-            } else {
-                // Створюємо повноцінну розмірну лінію
-                createDimensionLine(firstPoint, pointer);
+            // 1. Якщо ми в режимі малювання і НЕ натиснули на вже існуючу точку/текст
+            if (isDrawingMode && !target) {
+                this.isDragging = false; // Забороняємо перетягування, якщо ставимо точку
                 
-                // Очищення
-                canvas.getObjects().forEach(obj => { if(obj.id === 'temp') canvas.remove(obj); });
-                firstPoint = null;
-                // Залишаємо режим активним для наступної лінії
+                if (!firstPoint) {
+                    firstPoint = pointer;
+                    const tempDot = new fabric.Circle({
+                        left: pointer.x, top: pointer.y, radius: 4, fill: '#FF9500',
+                        originX: 'center', originY: 'center', id: 'temp', selectable: false
+                    });
+                    canvas.add(tempDot);
+                } else {
+                    createDimensionLine(firstPoint, pointer);
+                    canvas.getObjects().forEach(obj => { if(obj.id === 'temp') canvas.remove(obj); });
+                    firstPoint = null;
+                }
+                return; // Виходимо, щоб не спрацював панорамування
+            }
+
+            // 2. Логіка панорамування (працює, якщо ми НЕ малюємо АБО натиснули порожнє місце)
+            if (!target || opt.e.altKey) {
+                this.isDragging = true;
+                this.selection = false;
+                this.lastPosX = opt.e.clientX || (opt.e.touches ? opt.e.touches[0].clientX : 0);
+                this.lastPosY = opt.e.clientY || (opt.e.touches ? opt.e.touches[0].clientY : 0);
             }
         });
 
-        // Оновлення ліній при русі точок
-        canvas.on('object:moving', function(e) {
-            const p = e.target;
-            if (p.type === 'circle' && p.lineGroup) {
-                updateLinePos(p.lineGroup);
+        canvas.on('mouse:move', function(opt) {
+            if (this.isDragging) {
+                let e = opt.e;
+                let clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+                let clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+                
+                this.viewportTransform[4] += clientX - this.lastPosX;
+                this.viewportTransform[5] += clientY - this.lastPosY;
+                this.requestRenderAll();
+                
+                this.lastPosX = clientX;
+                this.lastPosY = clientY;
             }
+        });
+
+        canvas.on('mouse:up', function() {
+            this.isDragging = false;
         });
     }
 
@@ -355,4 +374,5 @@ let isDrawingMode = false;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
