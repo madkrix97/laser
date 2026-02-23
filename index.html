@@ -3,26 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Laser Points Move</title>
+    <title>Laser Engineering Mode</title>
     <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 10px; justify-content: center; }
-        button { padding: 15px; border-radius: 10px; border: none; background: #007AFF; color: white; font-weight: bold; }
+        .toolbar { padding: 10px; background: #1c1c1e; display: flex; gap: 8px; justify-content: center; border-bottom: 1px solid #333; }
+        button { padding: 12px 15px; border-radius: 10px; border: none; background: #007AFF; color: white; font-weight: bold; font-size: 13px; }
         .active { background: #FF9500 !important; }
-        #c-w { flex-grow: 1; position: relative; touch-action: none; }
+        #canvas-container { flex-grow: 1; position: relative; touch-action: none; }
+        #status { font-size: 11px; color: #888; text-align: center; padding: 5px; background: #1c1c1e; }
     </style>
 </head>
 <body>
 
-<div class="toolbar">
-    <button id="drawBtn">➕ РОЗМІР</button>
-    <button id="delBtn" style="background:red">🗑️</button>
-</div>
+    <div class="toolbar">
+        <button id="drawBtn">➕ НОВИЙ РОЗМІР</button>
+        <button id="photoBtn">📷 ФОТО</button>
+        <button id="delBtn" style="background:#FF3B30">🗑️ ВИДАЛИТИ</button>
+        <input type="file" id="fileInp" style="display:none" accept="image/*">
+    </div>
 
-<div id="c-w">
-    <canvas id="c"></canvas>
-</div>
+    <div id="canvas-container">
+        <canvas id="c"></canvas>
+    </div>
+    <div id="status">Натисніть "Новий розмір" і поставте дві точки</div>
 
 <script>
 (function() {
@@ -31,26 +35,31 @@
     window.onload = () => {
         canvas = new fabric.Canvas('c', {
             width: window.innerWidth,
-            height: window.innerHeight - 80,
+            height: window.innerHeight - 85,
             backgroundColor: '#111',
             enableRetinaScaling: true,
-            selection: false // вимикаємо рамку виділення для зручності тачу
+            selection: false
         });
 
+        // --- КНОПКИ ---
+        document.getElementById('photoBtn').onclick = () => document.getElementById('fileInp').click();
+        
         document.getElementById('drawBtn').onclick = function() {
             isDrawing = !isDrawing;
             this.classList.toggle('active', isDrawing);
+            document.getElementById('status').innerText = isDrawing ? "Вкажіть першу точку" : "Режим редагування";
         };
 
         document.getElementById('delBtn').onclick = () => {
-            // Видаляємо все, що пов'язане з активним об'єктом
             const active = canvas.getActiveObject();
-            if (active && active.relation) {
-                canvas.remove(active.relation.p1, active.relation.p2, active.relation.line, active.relation.text);
+            if (active && active.role === 'anchor') {
+                const pair = active.pair;
+                canvas.remove(pair.p1, pair.p2, pair.line, pair.text);
+                canvas.discardActiveObject().renderAll();
             }
-            canvas.discardActiveObject().renderAll();
         };
 
+        // --- МАЛЮВАННЯ ---
         canvas.on('mouse:down', (opt) => {
             if (!isDrawing) return;
             const pointer = canvas.getPointer(opt.e);
@@ -58,73 +67,82 @@
             if (!firstPoint) {
                 firstPoint = pointer;
                 const dot = new fabric.Circle({
-                    left: pointer.x, top: pointer.y, radius: 15, fill: 'rgba(255,255,0,0.5)',
-                    originX: 'center', originY: 'center', selectable: false, id: 'tmp'
+                    left: pointer.x, top: pointer.y, radius: 18, fill: 'rgba(255,255,0,0.4)',
+                    originX: 'center', originY: 'center', selectable: false, id: 'temp'
                 });
                 canvas.add(dot);
             } else {
-                createSmartLine(firstPoint, pointer);
-                canvas.getObjects('circle').forEach(o => { if(o.id==='tmp') canvas.remove(o); });
+                createDimension(firstPoint, pointer);
+                canvas.getObjects('circle').forEach(o => { if(o.id === 'temp') canvas.remove(o); });
                 firstPoint = null;
                 isDrawing = false;
                 document.getElementById('drawBtn').classList.remove('active');
             }
         });
 
-        function createSmartLine(start, end) {
-            // Створюємо дві точки
-            const p1 = createAnchor(start.x, start.y);
-            const p2 = createAnchor(end.x, end.y);
+        function createDimension(p1Pos, p2Pos) {
+            // Створюємо основні вузли (Точки)
+            const p1 = new fabric.Circle({
+                left: p1Pos.x, top: p1Pos.y, radius: 20, fill: '#FF9500',
+                originX: 'center', originY: 'center', hasControls: false, role: 'anchor'
+            });
+            const p2 = new fabric.Circle({
+                left: p2Pos.x, top: p2Pos.y, radius: 20, fill: '#FF9500',
+                originX: 'center', originY: 'center', hasControls: false, role: 'anchor'
+            });
 
-            // Створюємо лінію
+            // Створюємо зв'язок (Лінія)
             const line = new fabric.Line([p1.left, p1.top, p2.left, p2.top], {
-                stroke: 'yellow', strokeWidth: 3, selectable: false, evented: false
+                stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false
             });
 
-            // Створюємо текст
-            const text = new fabric.Text('0.00m', {
-                fontSize: 20, fill: 'white', backgroundColor: 'black',
-                originX: 'center', originY: 'center', selectable: false, evented: false
+            // Створюємо підпис (Текст)
+            const text = new fabric.Text('0.000', {
+                fontSize: 22, fill: 'white', backgroundColor: 'rgba(0,0,0,0.8)',
+                originX: 'center', originY: 'center', selectable: true, hasControls: false, padding: 5
             });
 
-            // Зв'язуємо об'єкти
-            const relation = { p1, p2, line, text };
-            p1.relation = p2.relation = relation;
+            // Зв'язуємо об'єкти між собою
+            const pair = { p1, p2, line, text };
+            p1.pair = p2.pair = text.pair = pair;
+
+            // Додаємо можливість ручного вводу при кліку на текст
+            text.on('mousedown', () => {
+                const val = prompt("Введіть розмір (м):", text.text);
+                if (val !== null) {
+                    text.set('text', val);
+                    canvas.renderAll();
+                }
+            });
 
             canvas.add(line, text, p1, p2);
-            updatePositions(relation);
+            updatePair(pair);
         }
 
-        function createAnchor(x, y) {
-            return new fabric.Circle({
-                left: x, top: y, radius: 20, // великий радіус для пальця
-                fill: 'yellow', originX: 'center', originY: 'center',
-                hasControls: false, hasBorders: false
-            });
-        }
-
-        // Головна функція перемальовування при русі
+        // РУХ ТОЧОК
         canvas.on('object:moving', (e) => {
-            const obj = e.target;
-            if (obj.relation) {
-                updatePositions(obj.relation);
-            }
+            if (e.target.pair) updatePair(e.target.pair);
         });
 
-        function updatePositions(rel) {
-            rel.line.set({ x1: rel.p1.left, y1: rel.p1.top, x2: rel.p2.left, y2: rel.p2.top });
-            rel.text.set({
-                left: (rel.p1.left + rel.p2.left) / 2,
-                top: (rel.p1.top + rel.p2.top) / 2
+        function updatePair(pair) {
+            pair.line.set({ x1: pair.p1.left, y1: pair.p1.top, x2: pair.p2.left, y2: pair.p2.top });
+            pair.text.set({
+                left: (pair.p1.left + pair.p2.left) / 2,
+                top: (pair.p1.top + pair.p2.top) / 2
             });
-            
-            // Розрахунок відстані (умовно, поки без калібрування)
-            const d = Math.sqrt(Math.pow(rel.p2.left - rel.p1.left, 2) + Math.pow(rel.p2.top - rel.p1.top, 2));
-            // Якщо буде підключено лазер, значення підставимо сюди
-            
-            rel.line.setCoords();
-            rel.text.setCoords();
+            pair.line.setCoords();
+            pair.text.setCoords();
         }
+
+        // ФОТО
+        document.getElementById('fileInp').onchange = (e) => {
+            const reader = new FileReader();
+            reader.onload = (f) => fabric.Image.fromURL(f.target.result, (img) => {
+                const r = Math.min(canvas.width/img.width, canvas.height/img.height);
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {scaleX:r, scaleY:r});
+            });
+            reader.readAsDataURL(e.target.files[0]);
+        };
     };
 })();
 </script>
