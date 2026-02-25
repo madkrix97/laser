@@ -66,7 +66,7 @@
             <button id="authBtn" class="btn btn-dark">🔑 Google Drive</button>
             <button id="newProjectBtn" class="btn btn-dark">➕ НОВИЙ ОБ'ЄКТ</button>
             <div style="display: flex; gap: 5px; margin-top: 5px;">
-                <button id="drawModeBtn" class="btn btn-orange" style="flex: 2;">➕ РОЗМІР2</button>
+                <button id="drawModeBtn" class="btn btn-orange" style="flex: 2;">➕ РОЗМІР3</button>
                 <button id="delObjBtn" class="btn btn-red" style="flex: 1;">🗑️</button>
             </div>
         </div>
@@ -214,24 +214,21 @@
 //     }
 
 function initCanvas() {
-    const wrapper = document.getElementById('canvas-wrapper');
-    magContainer = document.getElementById('magnifier');
-    magCtx = document.getElementById('mag-canvas').getContext('2d');
+        const wrapper = document.getElementById('canvas-wrapper');
+        canvas = new fabric.Canvas('c', {
+            width: wrapper.clientWidth,
+            height: wrapper.clientHeight,
+            selection: false,
+            backgroundColor: '#111',
+            allowTouchScrolling: false, // Важливо для мобільних пристроїв
+            perPixelTargetFind: false,  // Швидше виявлення об'єктів
+            targetFindTolerance: 15     // Збільшує зону "влучання" в точку
+        });
 
-    canvas = new fabric.Canvas('c', {
-        width: wrapper.clientWidth,
-        height: wrapper.clientHeight,
-        selection: false,
-        backgroundColor: '#111',
-        targetFindTolerance: 20
-    });
-
-    setupInteractions();
-}
-    
+        setupInteractions();
+    }
 
     function setupInteractions() {
-        let magCtx, magContainer;
         // ZOOM (Коліщатко)
         canvas.on('mouse:wheel', (opt) => {
             let delta = opt.e.deltaY;
@@ -277,7 +274,7 @@ function initCanvas() {
             this.lastPosY = opt.e.clientY || (opt.e.touches ? opt.e.touches[0].clientY : 0);
         });
 
-        MOVE
+        // MOVE
         canvas.on('mouse:move', function(opt) {
             // Рухаємо фон ТІЛЬКИ якщо активовано прапор перетягування
             if (this.isDragging && !isDrawingMode) {
@@ -302,9 +299,7 @@ function initCanvas() {
             // Оновлюємо координати всіх об'єктів після переміщення
             canvas.forEachObject(o => o.setCoords());
         });
-        
     }
-
 
 
     
@@ -442,6 +437,7 @@ function initCanvas() {
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
 
 
