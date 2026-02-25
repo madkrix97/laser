@@ -66,7 +66,7 @@
             <button id="authBtn" class="btn btn-dark">🔑 Google Drive</button>
             <button id="newProjectBtn" class="btn btn-dark">➕ НОВИЙ ОБ'ЄКТ</button>
             <div style="display: flex; gap: 5px; margin-top: 5px;">
-                <button id="drawModeBtn" class="btn btn-orange" style="flex: 2;">➕ РОЗМІР1</button>
+                <button id="drawModeBtn" class="btn btn-orange" style="flex: 2;">➕ РОЗМІР2</button>
                 <button id="delObjBtn" class="btn btn-red" style="flex: 1;">🗑️</button>
             </div>
         </div>
@@ -277,88 +277,31 @@ function initCanvas() {
             this.lastPosY = opt.e.clientY || (opt.e.touches ? opt.e.touches[0].clientY : 0);
         });
 
-        // MOVE
-        // canvas.on('mouse:move', function(opt) {
-        //     // Рухаємо фон ТІЛЬКИ якщо активовано прапор перетягування
-        //     if (this.isDragging && !isDrawingMode) {
-        //         const e = opt.e;
-        //         const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
-        //         const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+        MOVE
+        canvas.on('mouse:move', function(opt) {
+            // Рухаємо фон ТІЛЬКИ якщо активовано прапор перетягування
+            if (this.isDragging && !isDrawingMode) {
+                const e = opt.e;
+                const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+                const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
                 
-        //         this.viewportTransform[4] += clientX - this.lastPosX;
-        //         this.viewportTransform[5] += clientY - this.lastPosY;
-        //         this.requestRenderAll();
+                this.viewportTransform[4] += clientX - this.lastPosX;
+                this.viewportTransform[5] += clientY - this.lastPosY;
+                this.requestRenderAll();
                 
-        //         this.lastPosX = clientX; 
-        //         this.lastPosY = clientY;
-        //     } else if (opt.target && opt.target.owner) {
-        //         // Якщо ми тягнемо точку, оновлюємо лінію в реальному часі
-        //         updateDimension(opt.target.owner);
-        //     }
-        // });
+                this.lastPosX = clientX; 
+                this.lastPosY = clientY;
+            } else if (opt.target && opt.target.owner) {
+                // Якщо ми тягнемо точку, оновлюємо лінію в реальному часі
+                updateDimension(opt.target.owner);
+            }
+        });
 
-        // canvas.on('mouse:up', function() {
-        //     this.isDragging = false;
-        //     // Оновлюємо координати всіх об'єктів після переміщення
-        //     canvas.forEachObject(o => o.setCoords());
-        // });
-
-canvas.on('mouse:move', function(opt) {
-        if (this.isDragging && !isDrawingMode) {
-            // ... (існуючий код перетягування фото)
-        } 
-        else if (opt.target && opt.target.role === 'node') {
-            // Якщо ми тягнемо точку — показуємо лупу
-            updateDimension(opt.target.owner);
-            showMagnifier(opt.e);
-        }
-    });
-
-    canvas.on('mouse:up', function() {
-        this.isDragging = false;
-        magContainer.style.display = 'none'; // Ховаємо лупу
-    });
-
-    function showMagnifier(e) {
-        const pointer = canvas.getPointer(e);
-        const touch = e.touches ? e.touches[0] : e;
-        
-        magContainer.style.display = 'block';
-        
-        // Позиція лупи (трохи вище пальця, щоб було видно)
-        magContainer.style.left = (touch.clientX - 75) + 'px';
-        magContainer.style.top = (touch.clientY - 180) + 'px';
-
-        // Малюємо збільшену ділянку
-        magCtx.clearRect(0, 0, 150, 150);
-        magCtx.save();
-        
-        // Збільшення в 3 рази від поточного зуму
-        const zoom = canvas.getZoom() * 3;
-        magCtx.translate(75, 75);
-        magCtx.scale(zoom, zoom);
-        
-        // Центруємо на точці курсора
-        const vpt = canvas.viewportTransform;
-        magCtx.translate(-pointer.x, -pointer.y);
-        
-        // Малюємо фон (фото) у лупу
-        if (canvas.backgroundImage) {
-            canvas.backgroundImage.render(magCtx);
-        }
-        
-        magCtx.restore();
-        
-        // Малюємо перехрестя в центрі лупи для точності
-        magCtx.strokeStyle = '#0A84FF';
-        magCtx.lineWidth = 2;
-        magCtx.beginPath();
-        magCtx.moveTo(75, 60); magCtx.lineTo(75, 90);
-        magCtx.moveTo(60, 75); magCtx.lineTo(90, 75);
-        magCtx.stroke();
-    }
-
-
+        canvas.on('mouse:up', function() {
+            this.isDragging = false;
+            // Оновлюємо координати всіх об'єктів після переміщення
+            canvas.forEachObject(o => o.setCoords());
+        });
         
     }
 
@@ -499,5 +442,6 @@ canvas.on('mouse:move', function(opt) {
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
 
