@@ -45,7 +45,7 @@
             <button id="authBtn" class="btn btn-dark">🔑 Google Drive</button>
             <button id="newProjectBtn" class="btn btn-dark">➕ НОВИЙ ОБ'ЄКТ</button>
             <div style="display: flex; gap: 5px; margin-top: 5px;">
-                <button id="drawModeBtn" class="btn btn-orange" style="flex: 2;">➕ РОЗМІР2</button>
+                <button id="drawModeBtn" class="btn btn-orange" style="flex: 2;">➕ РОЗМІР3</button>
                 <button id="delObjBtn" class="btn btn-red" style="flex: 1;">🗑️</button>
             </div>
         </div>
@@ -104,20 +104,90 @@
     }
 
     // --- CANVAS ЛОГІКА ---
-    function initCanvas() {
+    // function initCanvas() {
+    //     const wrapper = document.getElementById('canvas-wrapper');
+    //     canvas = new fabric.Canvas('c', {
+    //         width: wrapper.clientWidth,
+    //         height: wrapper.clientHeight,
+    //         selection: false,
+    //         backgroundColor: '#111'
+    //     });
+
+    //     setupInteractions();
+    // }
+
+    // function setupInteractions() {
+    //     // ZOOM (Коліщатко або Щипок)
+    //     canvas.on('mouse:wheel', (opt) => {
+    //         let delta = opt.e.deltaY;
+    //         let zoom = canvas.getZoom() * (0.999 ** delta);
+    //         if (zoom > 20) zoom = 20; if (zoom < 0.01) zoom = 0.01;
+    //         canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+    //         opt.e.preventDefault(); opt.e.stopPropagation();
+    //     });
+
+    //     // DOWN
+    //     canvas.on('mouse:down', function(opt) {
+    //         const target = canvas.findTarget(opt.e);
+            
+    //         // 1. Якщо малюємо і не влучили в існуючу точку
+    //         if (isDrawingMode && !target) {
+    //             const pointer = canvas.getPointer(opt.e);
+    //             if (!firstPoint) {
+    //                 firstPoint = pointer;
+    //                 const dot = new fabric.Circle({ left: pointer.x, top: pointer.y, radius: 5, fill: 'orange', originX: 'center', originY: 'center', id: 'temp', selectable: false });
+    //                 canvas.add(dot);
+    //             } else {
+    //                 createDimension(firstPoint, pointer);
+    //                 const temp = canvas.getObjects().find(o => o.id === 'temp');
+    //                 if (temp) canvas.remove(temp);
+    //                 firstPoint = null;
+    //             }
+    //             return;
+    //         }
+
+    //         // 2. Якщо просто навігація (не влучили в об'єкт)
+    //         if (!target) {
+    //             this.isDragging = true;
+    //             this.lastPosX = opt.e.clientX || (opt.e.touches ? opt.e.touches[0].clientX : 0);
+    //             this.lastPosY = opt.e.clientY || (opt.e.touches ? opt.e.touches[0].clientY : 0);
+    //         }
+    //     });
+
+    //     // MOVE
+    //     canvas.on('mouse:move', function(opt) {
+    //         if (this.isDragging && !isDrawingMode) {
+    //             const e = opt.e;
+    //             const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+    //             const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+    //             this.viewportTransform[4] += clientX - this.lastPosX;
+    //             this.viewportTransform[5] += clientY - this.lastPosY;
+    //             this.requestRenderAll();
+    //             this.lastPosX = clientX; this.lastPosY = clientY;
+    //         }
+    //         if (opt.target && opt.target.role) updateDimension(opt.target.owner);
+    //     });
+
+    //     canvas.on('mouse:up', function() { this.isDragging = false; });
+    // }
+
+function initCanvas() {
         const wrapper = document.getElementById('canvas-wrapper');
         canvas = new fabric.Canvas('c', {
             width: wrapper.clientWidth,
             height: wrapper.clientHeight,
             selection: false,
-            backgroundColor: '#111'
+            backgroundColor: '#111',
+            allowTouchScrolling: false, // Важливо для мобільних пристроїв
+            perPixelTargetFind: false,  // Швидше виявлення об'єктів
+            targetFindTolerance: 15     // Збільшує зону "влучання" в точку
         });
 
         setupInteractions();
     }
 
     function setupInteractions() {
-        // ZOOM (Коліщатко або Щипок)
+        // ZOOM (Коліщатко)
         canvas.on('mouse:wheel', (opt) => {
             let delta = opt.e.deltaY;
             let zoom = canvas.getZoom() * (0.999 ** delta);
@@ -130,12 +200,22 @@
         canvas.on('mouse:down', function(opt) {
             const target = canvas.findTarget(opt.e);
             
-            // 1. Якщо малюємо і не влучили в існуючу точку
-            if (isDrawingMode && !target) {
+            // Пріоритет 1: Якщо ми натиснули на існуючий об'єкт (точку/текст)
+            // Ми нічого не робимо, даємо Fabric.js штатно почати перетягування
+            if (target) {
+                this.isDragging = false; 
+                return; 
+            }
+
+            // Пріоритет 2: Режим малювання (тільки якщо не влучили в об'єкт)
+            if (isDrawingMode) {
                 const pointer = canvas.getPointer(opt.e);
                 if (!firstPoint) {
                     firstPoint = pointer;
-                    const dot = new fabric.Circle({ left: pointer.x, top: pointer.y, radius: 5, fill: 'orange', originX: 'center', originY: 'center', id: 'temp', selectable: false });
+                    const dot = new fabric.Circle({ 
+                        left: pointer.x, top: pointer.y, radius: 5, fill: 'orange', 
+                        originX: 'center', originY: 'center', id: 'temp', selectable: false 
+                    });
                     canvas.add(dot);
                 } else {
                     createDimension(firstPoint, pointer);
@@ -146,31 +226,42 @@
                 return;
             }
 
-            // 2. Якщо просто навігація (не влучили в об'єкт)
-            if (!target) {
-                this.isDragging = true;
-                this.lastPosX = opt.e.clientX || (opt.e.touches ? opt.e.touches[0].clientX : 0);
-                this.lastPosY = opt.e.clientY || (opt.e.touches ? opt.e.touches[0].clientY : 0);
-            }
+            // Пріоритет 3: Панорамування (тільки якщо порожнє місце)
+            this.isDragging = true;
+            this.lastPosX = opt.e.clientX || (opt.e.touches ? opt.e.touches[0].clientX : 0);
+            this.lastPosY = opt.e.clientY || (opt.e.touches ? opt.e.touches[0].clientY : 0);
         });
 
         // MOVE
         canvas.on('mouse:move', function(opt) {
+            // Рухаємо фон ТІЛЬКИ якщо активовано прапор перетягування
             if (this.isDragging && !isDrawingMode) {
                 const e = opt.e;
                 const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
                 const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+                
                 this.viewportTransform[4] += clientX - this.lastPosX;
                 this.viewportTransform[5] += clientY - this.lastPosY;
                 this.requestRenderAll();
-                this.lastPosX = clientX; this.lastPosY = clientY;
+                
+                this.lastPosX = clientX; 
+                this.lastPosY = clientY;
+            } else if (opt.target && opt.target.owner) {
+                // Якщо ми тягнемо точку, оновлюємо лінію в реальному часі
+                updateDimension(opt.target.owner);
             }
-            if (opt.target && opt.target.role) updateDimension(opt.target.owner);
         });
 
-        canvas.on('mouse:up', function() { this.isDragging = false; });
+        canvas.on('mouse:up', function() {
+            this.isDragging = false;
+            // Оновлюємо координати всіх об'єктів після переміщення
+            canvas.forEachObject(o => o.setCoords());
+        });
     }
 
+
+
+    
     function createDimension(p1, p2, val = "0.000") {
         const common = { radius: 12, fill: 'rgba(255,149,0,0.5)', originX: 'center', originY: 'center', hasControls: false, hasBorders: false };
         const n1 = new fabric.Circle({ ...common, left: p1.x, top: p1.y, role: 'node' });
@@ -305,3 +396,4 @@
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
