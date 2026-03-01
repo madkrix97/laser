@@ -62,6 +62,27 @@ let canvas, tokenClient, accessToken = localStorage.getItem('at');
 let rootId=null, currentFolderId=null, currentPhotoId=null;
 let isDrawingMode=false, firstPoint=null;
 let photoCache={}, lineDataCache={};
+
+// Ініціалізація локального offline-кешу
+const offlineCacheKey = 'laser_offline_cache';
+
+// Завантажуємо кеш з localStorage
+function loadOfflineCache() {
+    const data = localStorage.getItem(offlineCacheKey);
+    if (data) {
+        lineDataCache = JSON.parse(data);
+    }
+}
+
+// Зберігаємо кеш у localStorage
+function saveOfflineCache() {
+    localStorage.setItem(offlineCacheKey, JSON.stringify(lineDataCache));
+}
+
+// Викликаємо на старті додатка
+loadOfflineCache();
+
+    
 let offlineQueue = JSON.parse(localStorage.getItem('offlineQueue')||"[]");
 
 // ---------------- OFFLINE QUEUE ----------------
@@ -137,11 +158,31 @@ function initCanvas(){
     let isDragging = false;
     let lastPosX, lastPosY;
 
-    // --- Дебаунс-збереження ---
-    const saveCurrentDataDebounced = debounce(async function() {
-        await saveCurrentData(); // твоя функція збереження
-        setStatus("✅ Розмір збережено", 1500);
-    }, 500);
+const saveCurrentDataDebounced = debounce(async function() {
+    // Оновлюємо локальний кеш перед будь-яким відправленням на Drive
+    if (currentPhotoId) {
+        const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+        lineDataCache[currentPhotoId] = canvas.getObjects()
+            .filter(o => o.role === 'node' && o.owner)
+            .map(node => {
+                if (node === node.owner.n1) {
+                    return {
+                        p1: { x: node.owner.n1.left / scale, y: node.owner.n1.top / scale },
+                        p2: { x: node.owner.n2.left / scale, y: node.owner.n2.top / scale },
+                        val: node.owner.text.text
+                    };
+                }
+                return null;
+            })
+            .filter(n => n);
+        saveOfflineCache(); // ✅ локальне збереження
+    }
+
+    // Тільки якщо є інтернет та токен, синхронізуємо на Drive
+    if (navigator.onLine && accessToken) {
+        await saveCurrentData(); 
+    }
+}, 500);
 
     // --- ПЕРЕМІЩЕННЯ ТОЧОК ---
     canvas.on('object:moving', (e) => {
@@ -265,21 +306,37 @@ async function saveCurrentData(overrideData){
 
 // ---------------- LOAD DATA ----------------
 async function loadCurrentData(photoId){
-    const fileName=`data_${photoId}.json`;
-    const scale = canvas.backgroundImage?canvas.backgroundImage.scaleX:1;
+    const fileName = `data_${photoId}.json`;
+    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+
+    // Спочатку беремо дані з локального кешу (offline)
     if(lineDataCache[photoId]){
-        lineDataCache[photoId].forEach(p=>createDimension({x:p.p1.x*scale,y:p.p1.y*scale},{x:p.p2.x*scale,y:p.p2.y*scale},p.val));
-        return;
+        lineDataCache[photoId].forEach(p => 
+            createDimension({x: p.p1.x * scale, y: p.p1.y * scale}, {x: p.p2.x * scale, y: p.p2.y * scale}, p.val)
+        );
     }
-    try{
-        const res=await gapi.client.drive.files.list({q:`name='${fileName}' and '${currentFolderId}' in parents and trashed=false`});
-        if(res.result.files.length>0){
-            const dataRes=await fetch(`https://www.googleapis.com/drive/v3/files/${res.result.files[0].id}?alt=media`,{headers:{'Authorization':'Bearer '+accessToken}});
-            const points=await dataRes.json();
-            lineDataCache[photoId]=points;
-            points.forEach(p=>createDimension({x:p.p1.x*scale,y:p.p1.y*scale},{x:p.p2.x*scale,y:p.p2.y*scale},p.val));
+
+    // Якщо є інтернет і токен, підтягуємо з Drive і оновлюємо локальний кеш
+    if(navigator.onLine && accessToken){
+        try {
+            const res = await gapi.client.drive.files.list({
+                q: `name='${fileName}' and '${currentFolderId}' in parents and trashed=false`
+            });
+            if(res.result.files.length > 0){
+                const dataRes = await fetch(`https://www.googleapis.com/drive/v3/files/${res.result.files[0].id}?alt=media`, {
+                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                });
+                const points = await dataRes.json();
+                lineDataCache[photoId] = points;
+                saveOfflineCache(); // ✅ оновлюємо локальний кеш
+                points.forEach(p => 
+                    createDimension({x: p.p1.x * scale, y: p.p1.y * scale}, {x: p.p2.x * scale, y: p.p2.y * scale}, p.val)
+                );
+            }
+        } catch(err) {
+            console.warn("Drive offline load failed", err);
         }
-    }catch(e){console.warn("Немає доступу до Drive або офлайн");}
+    }
 }
 
 // ---------------- PHOTO CACHE ----------------
@@ -398,5 +455,6 @@ window.gisLoaded=gisLoaded;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
 
