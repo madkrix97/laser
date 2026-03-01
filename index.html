@@ -179,14 +179,30 @@ function initCanvas(){
 }
 
 // ---------------- DIMENSIONS ----------------
-function createDimension(p1,p2,val="0.000"){
+function createDimension(p1, p2, val="0.000"){
     const props={radius:12,fill:'rgba(255,149,0,0.8)',originX:'center',originY:'center',hasControls:false,hasBorders:false,role:'node'};
     const n1=new fabric.Circle({...props,left:p1.x,top:p1.y});
     const n2=new fabric.Circle({...props,left:p2.x,top:p2.y});
     const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y],{stroke:'#FF9500',strokeWidth:3,selectable:false,evented:false});
     const text=new fabric.Text(val,{fontSize:20,fill:'white',backgroundColor:'black',originX:'center',originY:'center',hasControls:false});
+
     const owner={n1,n2,line,text};
     n1.owner=n2.owner=text.owner=owner;
+
+    // зберігати координати відносно зображення
+    owner.getRelativeData = () => {
+        if(!canvas.backgroundImage) return null;
+        const img = canvas.backgroundImage;
+        const left = img.left - (img.width*img.scaleX)/2;
+        const top = img.top - (img.height*img.scaleY)/2;
+        const width = img.width*img.scaleX;
+        const height = img.height*img.scaleY;
+        return {
+            p1: {x: (n1.left-left)/width, y: (n1.top-top)/height},
+            p2: {x: (n2.left-left)/width, y: (n2.top-top)/height},
+            val: text.text
+        };
+    };
 
     text.on('mousedown',()=>{
         const v=prompt("Розмір:",text.text);
@@ -206,37 +222,33 @@ function updateDimension(o){
 // ---------------- SAVE / LOAD ----------------
 async function saveCurrentData(){
     if(!currentPhotoId || !canvas) return;
-    const scale=canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-    const data=canvas.getObjects().filter(o=>o.role==='node'&&o.owner).map(node=>{
-        if(node===node.owner.n1){
-            return {p1:{x:node.owner.n1.left/scale,y:node.owner.n1.top/scale},p2:{x:node.owner.n2.left/scale,y:node.owner.n2.top/scale},val:node.owner.text.text};
-        }
-        return null;
-    }).filter(n=>n);
+    const data = canvas.getObjects().filter(o=>o.owner && o.role==='node')
+                    .map(o=>o.owner.getRelativeData())
+                    .filter(n=>n);
 
     offlineLineCache[currentPhotoId]=data;
     lineDataCache[currentPhotoId]=data;
     saveOfflineCache();
 
-    if(!navigator.onLine) { setStatus("⚡ Збережено локально (офлайн)",2000); return; }
-
+    if(!navigator.onLine){ setStatus("⚡ Збережено локально",2000); return; }
     if(!accessToken) return;
-    const fileName=`data_${currentPhotoId}.json`;
+
+    const fileName = `data_${currentPhotoId}.json`;
     try{
-        const res=await gapi.client.drive.files.list({q:`name='${fileName}' and '${currentFolderId}' in parents and trashed=false`});
-        const fileContent=JSON.stringify(data);
+        const res = await gapi.client.drive.files.list({q:`name='${fileName}' and '${currentFolderId}' in parents and trashed=false`});
+        const fileContent = JSON.stringify(data);
 
         if(res.result.files.length>0){
             await fetch(`https://www.googleapis.com/upload/drive/v3/files/${res.result.files[0].id}?uploadType=media`,{
-                method:'PATCH',headers:{'Authorization':'Bearer '+accessToken},body:fileContent
+                method:'PATCH', headers:{'Authorization':'Bearer '+accessToken}, body:fileContent
             });
         } else {
             const meta={name:fileName,parents:[currentFolderId]};
             const form=new FormData();
-            form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
-            form.append('file',new Blob([fileContent],{type:'application/json'}));
+            form.append('metadata', new Blob([JSON.stringify(meta)],{type:'application/json'}));
+            form.append('file', new Blob([fileContent],{type:'application/json'}));
             await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
-                method:'POST',headers:{'Authorization':'Bearer '+accessToken},body:form
+                method:'POST', headers:{'Authorization':'Bearer '+accessToken}, body:form
             });
         }
         setStatus("✅ Збережено на Drive");
@@ -315,50 +327,62 @@ async function fetchPhoto(id){
     photoCache[id]=url; return url;
 }
 async function setMainImg(url, id, thumb){
-
-    if(canvas) await saveCurrentData(); // ✅ зберегти поточне перед очищенням
     currentPhotoId = id;
-
-    document.querySelectorAll('.thumb')
-        .forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
     thumb.classList.add('active');
 
-    if (!canvas) return;
+    if(!canvas) return;
 
-    // ❗ Очищаємо тільки об'єкти, НЕ весь canvas
-    canvas.getObjects().forEach(obj => canvas.remove(obj));
+    // Очищаємо canvas, але залишаємо viewport
+    canvas.getObjects().forEach(obj=>canvas.remove(obj));
 
-    // ВАЖЛИВО: додаємо crossOrigin
     fabric.Image.fromURL(url, function(img){
-
         const wrapper = document.getElementById('canvas-wrapper');
-
-        // Автоматичний resize canvas
         canvas.setWidth(wrapper.clientWidth);
         canvas.setHeight(wrapper.clientHeight);
 
-        const ratio = Math.min(
-            canvas.width / img.width,
-            canvas.height / img.height
-        );
-
+        // масштаб для fit
+        const scale = Math.min(canvas.width/img.width, canvas.height/img.height);
         img.set({
-            originX: 'center',
-            originY: 'center',
-            left: canvas.width / 2,
-            top: canvas.height / 2,
-            selectable: false,
-            evented: false,
-            scaleX: ratio,
-            scaleY: ratio
+            originX:'center', originY:'center',
+            left: canvas.width/2, top: canvas.height/2,
+            selectable: false, evented: false,
+            scaleX: scale, scaleY: scale
         });
 
         canvas.setBackgroundImage(img, () => {
+            canvas.viewportTransform = [1,0,0,1,0,0]; // початковий viewport
             canvas.renderAll();
             loadCurrentData(id);
         });
+    }, {crossOrigin:'anonymous'});
 
-    }, { crossOrigin: 'anonymous' });
+    // активуємо pan + zoom
+    let isDragging=false, lastX=0, lastY=0;
+    canvas.off('mouse:down'); canvas.off('mouse:move'); canvas.off('mouse:up');
+    canvas.on('mouse:down', opt=>{
+        if(opt.e.altKey){ isDragging=true; lastX=opt.e.clientX; lastY=opt.e.clientY; }
+    });
+    canvas.on('mouse:move', opt=>{
+        if(isDragging){
+            const e=opt.e;
+            const t=canvas.viewportTransform;
+            t[4]+=e.clientX-lastX;
+            t[5]+=e.clientY-lastY;
+            canvas.setViewportTransform(t);
+            canvas.requestRenderAll();
+            lastX=e.clientX; lastY=e.clientY;
+        }
+    });
+    canvas.on('mouse:up', ()=>{ isDragging=false; });
+
+    // zoom на скрол
+    canvas.on('mouse:wheel', opt=>{
+        const delta = opt.e.deltaY < 0 ? 1.1 : 0.9;
+        const pointer = canvas.getPointer(opt.e);
+        canvas.zoomToPoint({x:pointer.x,y:pointer.y}, canvas.getZoom()*delta);
+        opt.e.preventDefault(); opt.e.stopPropagation();
+    });
 }
 
 function downloadCanvasWithDimensions(filename = null){
@@ -590,6 +614,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
