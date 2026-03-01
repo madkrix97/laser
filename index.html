@@ -176,26 +176,99 @@ function initCanvas(){
         }
     });
     canvas.on('mouse:up', ()=>{ canvas.isDragging=false; });
+
+canvas.on("mouse:dblclick", function(opt){
+    const obj = opt.target;
+    if(obj && obj.owner){
+        canvas.remove(obj.owner.n1);
+        canvas.remove(obj.owner.n2);
+        canvas.remove(obj.owner.line);
+        canvas.remove(obj.owner.text);
+        canvas.renderAll();
+        autoSave();
+    }
+});
+
+    
 }
 
 // ---------------- DIMENSIONS ----------------
-function createDimension(p1,p2,val="0.000"){
-    const props={radius:12,fill:'rgba(255,149,0,0.8)',originX:'center',originY:'center',hasControls:false,hasBorders:false,role:'node'};
-    const n1=new fabric.Circle({...props,left:p1.x,top:p1.y});
-    const n2=new fabric.Circle({...props,left:p2.x,top:p2.y});
-    const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y],{stroke:'#FF9500',strokeWidth:3,selectable:false,evented:false});
-    const text=new fabric.Text(val,{fontSize:20,fill:'white',backgroundColor:'black',originX:'center',originY:'center',hasControls:false});
-    const owner={n1,n2,line,text};
-    n1.owner=n2.owner=text.owner=owner;
+function createDimension(p1, p2, savedValue=null){
 
-    text.on('mousedown',()=>{
-        const v=prompt("Розмір:",text.text);
-        if(v){ text.set('text',v); canvas.renderAll(); saveCurrentData(); }
-    });
+    const circleOptions = {
+        radius: 6,
+        fill: '#00d2ff',
+        originX: 'center',
+        originY: 'center'
+    };
 
-    canvas.add(line,text,n1,n2);
-    updateDimension(owner);
-    return owner;
+    const c1 = new fabric.Circle({ ...circleOptions, left: p1.x, top: p1.y });
+    const c2 = new fabric.Circle({ ...circleOptions, left: p2.x, top: p2.y });
+
+    const line = new fabric.Line(
+        [p1.x, p1.y, p2.x, p2.y],
+        {
+            stroke: '#00d2ff',
+            strokeWidth: 2,
+            selectable: false,
+            evented: false
+        }
+    );
+
+    function getDistance(){
+        return Math.round(
+            Math.sqrt(
+                Math.pow(c2.left - c1.left,2) +
+                Math.pow(c2.top - c1.top,2)
+            )
+        );
+    }
+
+    const text = new fabric.Text(
+        savedValue ? savedValue+" mm" : getDistance()+" mm",
+        {
+            left:(p1.x+p2.x)/2,
+            top:(p1.y+p2.y)/2 - 10,
+            fontSize:18,
+            fill:'#ffffff',
+            backgroundColor:'rgba(0,0,0,0.6)',
+            originX:'center',
+            originY:'center',
+            selectable:false,
+            evented:false
+        }
+    );
+
+    function updateLine(){
+        line.set({
+            x1:c1.left,
+            y1:c1.top,
+            x2:c2.left,
+            y2:c2.top
+        });
+
+        text.set({
+            left:(c1.left+c2.left)/2,
+            top:(c1.top+c2.top)/2 - 10
+        });
+
+        if(!savedValue){
+            text.text = getDistance()+" mm";
+        }
+
+        canvas.renderAll();
+        autoSave(); // 🔥 важливо
+    }
+
+    c1.on("moving", updateLine);
+    c2.on("moving", updateLine);
+
+    canvas.add(line, c1, c2, text);
+
+    // 🔥 групуємо логічно
+    const dimensionGroup = { n1:c1, n2:c2, line:line, text:text };
+    c1.owner = dimensionGroup;
+    c2.owner = dimensionGroup;
 }
 function updateDimension(o){
     o.line.set({x1:o.n1.left,y1:o.n1.top,x2:o.n2.left,y2:o.n2.top});
@@ -256,6 +329,13 @@ function loadCurrentData(photoId){
         }
     });
 
+    // 🔥 очищаємо старі розміри
+    canvas.getObjects().forEach(obj=>{
+        if(!(obj instanceof fabric.Image)){
+            canvas.remove(obj);
+        }
+    });
+    
     canvas.renderAll();
 
     const scale = canvas.backgroundImage 
@@ -359,6 +439,35 @@ async function setMainImg(url, id, thumb){
     }, { crossOrigin: 'anonymous' });
 }
 
+function autoSave(){
+    if(!currentPhotoId) return;
+
+    const imageObj = canvas.getObjects()[0];
+    const scale = imageObj ? imageObj.scaleX : 1;
+
+    const data = [];
+
+    canvas.getObjects().forEach(obj=>{
+        if(obj.owner){
+            data.push({
+                p1:{
+                    x: obj.owner.n1.left / scale,
+                    y: obj.owner.n1.top / scale
+                },
+                p2:{
+                    x: obj.owner.n2.left / scale,
+                    y: obj.owner.n2.top / scale
+                },
+                val: null
+            });
+        }
+    });
+
+    offlineLineCache[currentPhotoId] = data;
+    localStorage.setItem('laser_offline', JSON.stringify(offlineLineCache));
+}
+
+    
 // ---------------- START APP ----------------
 async function startApp(){
     if(!accessToken || !gapi.client) return;
@@ -515,6 +624,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
