@@ -267,38 +267,31 @@ function loadCurrentData(photoId){
             canvas.remove(obj.owner.text);
         }
     });
-
     canvas.renderAll();
 
     const bg = canvas.backgroundImage;
-    if(!bg) return;
+    if(!bg) return; // якщо фон ще не готовий — вихід
 
-    // Обчислюємо офсет та масштаб для поточного фону
-    const scaleX = bg.scaleX;
-    const scaleY = bg.scaleY;
-    const offsetX = bg.left - (bg.width * scaleX) / 2;
-    const offsetY = bg.top - (bg.height * scaleY) / 2;
+    // Масштаб та офсет для поточного фону
+    const scaleX = bg.scaleX || 1;
+    const scaleY = bg.scaleY || 1;
+    const offsetX = (bg.left || 0) - (bg.width * scaleX) / 2;
+    const offsetY = (bg.top || 0) - (bg.height * scaleY) / 2;
 
-    // ✅ ГОЛОВНА ЛОГІКА БЕЗ ДУБЛІВ
-    let data = null;
-
-    if(offlineLineCache[photoId]){
-        data = offlineLineCache[photoId];
-        setStatus("⚡ Використано локальні зміни",1500);
-    } else if(lineDataCache[photoId]){
-        data = lineDataCache[photoId];
-    }
-
+    // ✅ Вибираємо дані
+    let data = offlineLineCache[photoId] || lineDataCache[photoId];
     if(!data) return;
 
+    if(offlineLineCache[photoId]) setStatus("⚡ Використано локальні зміни",1500);
+
+    // Відновлюємо розміри на canvas
     data.forEach(p=>{
-        // Конвертуємо координати з оригінального зображення в канвасні
         const x1 = p.p1.x * scaleX + offsetX;
         const y1 = p.p1.y * scaleY + offsetY;
         const x2 = p.p2.x * scaleX + offsetX;
         const y2 = p.p2.y * scaleY + offsetY;
 
-        createDimension({x:x1,y:y1},{x:x2,y:y2},p.val);
+        createDimension({x:x1, y:y1}, {x:x2, y:y2}, p.val);
     });
 
     canvas.renderAll();
@@ -621,6 +614,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
