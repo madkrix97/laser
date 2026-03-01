@@ -27,6 +27,27 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 .btn-red {background:var(--red);}
 .btn-dark {background:#3a3a3c;}
 #status-bar {font-size:11px;color:var(--green);padding:5px;text-align:center;background:#000;}
+
+#net-status{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:14px;
+  padding:6px 10px;
+  border-radius:20px;
+  background:#1e1e1e;
+  color:#fff;
+  width:max-content;
+}
+
+#net-status .dot{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:gray;
+}
+
+    
 </style>
 </head>
 <body>
@@ -34,6 +55,12 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
     <div class="sidebar-header">
         <button id="authBtn" class="btn btn-dark">🔑 Google Drive</button>
         <button id="newProjectBtn" class="btn btn-dark">➕ НОВИЙ ОБ'ЄКТ</button>
+
+<div id="net-status">
+  <span class="dot"></span>
+  <span class="text">Checking...</span>
+</div>
+        
         <div style="display:flex;gap:5px;margin-top:5px;">
             <button id="drawModeBtn" class="btn btn-orange" style="flex:2;">➕ РОЗМІР</button>
             <button id="delObjBtn" class="btn btn-red" style="flex:1;">🗑️</button>
@@ -398,7 +425,7 @@ document.getElementById('exportBtn').onclick=()=>{
 
 // ---------------- ONLINE/OFFLINE EVENTS ----------------
 window.addEventListener('online', async()=>{
-    setStatus("🌐 Інтернет відновлено, синхронізація...");
+    updateNetStatus("sync");
 
     try{
         for(let photoId in offlineLineCache){ 
@@ -406,15 +433,14 @@ window.addEventListener('online', async()=>{
             await saveCurrentData(); 
         }
 
-        // ✅ ОЧИЩАЄМО тільки після успішного збереження
         offlineLineCache = {};
         localStorage.removeItem('laser_offline');
 
-        setStatus("✅ Офлайн-зміни синхронізовані",2000);
+        updateNetStatus("online");
 
     } catch(e){
-        console.error("Sync error:", e);
-        setStatus("⚠️ Помилка синхронізації",3000);
+        console.error(e);
+        updateNetStatus("offline");
     }
 });
 window.addEventListener('offline', ()=>{
@@ -439,6 +465,26 @@ document.getElementById('fileInp').onchange=async function(e){
     loadPhotos();
 };
 
+const netDot = document.querySelector('#net-status .dot');
+const netText = document.querySelector('#net-status .text');
+
+function updateNetStatus(state){
+    if(state === "online"){
+        netDot.style.background = "#18c964";
+        netText.textContent = "ONLINE";
+    }
+    else if(state === "offline"){
+        netDot.style.background = "#f31260";
+        netText.textContent = "OFFLINE";
+    }
+    else if(state === "sync"){
+        netDot.style.background = "#f5a524";
+        netText.textContent = "SYNC...";
+    }
+}
+
+    
+
 // ---------------- INITIAL LOAD ----------------
 window.onload = function(){
     const s = document.createElement('script');
@@ -451,8 +497,24 @@ window.onload = function(){
     gis.onload = gisLoaded;
     document.body.appendChild(gis);
 };
+
+if(navigator.onLine){
+    updateNetStatus("online");
+}else{
+    updateNetStatus("offline");
+}
+
+window.addEventListener('online', ()=>{
+    updateNetStatus("sync"); // починаємо синк
+});
+
+window.addEventListener('offline', ()=>{
+    updateNetStatus("offline");
+});
+    
 </script>
 </body>
 </html>
+
 
 
