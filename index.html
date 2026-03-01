@@ -257,6 +257,7 @@ async function saveCurrentData(){
 function loadCurrentData(photoId){
     if(!canvas) return;
 
+    // Очищуємо тільки dimension об'єкти
     canvas.getObjects().forEach(obj=>{
         if(obj.owner){
             canvas.remove(obj.owner.n1);
@@ -274,18 +275,17 @@ function loadCurrentData(photoId){
     if(!data) return;
     if(offlineLineCache[photoId]) setStatus("⚡ Використано локальні зміни",1500);
 
-    // Відновлення точок відносно чотирьох кутів зображення
-    const imgWidth = bg.width;
-    const imgHeight = bg.height;
+    const imgWidth = bg._element.naturalWidth || bg.width;
+    const imgHeight = bg._element.naturalHeight || bg.height;
     const canvasWidth = canvas.width;
     const canvasHeight = canvas.height;
 
-    // Масштаб для поміщення фото в canvas
+    // Масштаб для поміщення фото у canvas
     const scale = Math.min(canvasWidth / imgWidth, canvasHeight / imgHeight);
 
-    // Верхній лівий кут фото на канвасі
-    const offsetX = bg.left - (imgWidth * scale) / 2;
-    const offsetY = bg.top - (imgHeight * scale) / 2;
+    // Верхній лівий кут фото на canvas
+    const offsetX = canvasWidth/2 - (imgWidth * scale)/2;
+    const offsetY = canvasHeight/2 - (imgHeight * scale)/2;
 
     data.forEach(p=>{
         const x1 = p.p1.x * scale + offsetX;
@@ -616,6 +616,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
