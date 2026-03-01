@@ -256,45 +256,13 @@ async function loadCurrentData(photoId){
 }
 
 // --- PHOTO CACHE ---
-const photoCache = {}; // { photoId: { url, folderId } }
-let loadingCount = 0;
-
-function showLoading() {
-    loadingCount++;
-    document.getElementById('loading-indicator').style.display = 'block';
-}
-
-function hideLoading() {
-    loadingCount = Math.max(0, loadingCount - 1);
-    if (loadingCount === 0) {
-        document.getElementById('loading-indicator').style.display = 'none';
-    }
-}
-
-async function fetchPhoto(id, folderId) {
-    // Перевірка кешу
-    if (photoCache[id] && photoCache[id].folderId === folderId) {
-        return photoCache[id].url;
-    }
-
-    showLoading();
-    try {
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
-            headers: { 'Authorization': 'Bearer ' + accessToken }
-        });
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-
-        // Збереження у кеш
-        photoCache[id] = { url, folderId };
-        return url;
-    } catch (err) {
-        console.error("Помилка завантаження фото:", err);
-        setStatus("❌ Помилка завантаження фото", 3000);
-        return null;
-    } finally {
-        hideLoading();
-    }
+async function fetchPhoto(id){
+    if(photoCache[id]) return photoCache[id];
+    const res=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`,{headers:{'Authorization':'Bearer '+accessToken}});
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    photoCache[id]=url;
+    return url;
 }
 
 // --- EXPORT ---
@@ -346,41 +314,21 @@ async function loadPhotos(){
     });
 }
 
-async function setMainImg(fileId, thumb) {
-    showLoading();
-    const url = await fetchPhoto(fileId, currentFolderId);
-    if (!url) return;
-
-    currentPhotoId = fileId;
-    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
+function setMainImg(url,id,thumb){
+    currentPhotoId=id;
+    document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active'));
     thumb.classList.add('active');
-
-    fabric.Image.fromURL(url, (img) => {
+    fabric.Image.fromURL(url,img=>{
         canvas.clear();
-
-        const ratio = Math.min(canvas.width / img.width, canvas.height / img.height);
-        canvas.setBackgroundImage(img, () => {
-            loadCurrentData(fileId);
-            canvas.renderAll();
-            setStatus("✅ Фото завантажено", 1500);
-        }, { scaleX: ratio, scaleY: ratio });
+        const ratio=Math.min(canvas.width/img.width,canvas.height/img.height);
+        canvas.setBackgroundImage(img,()=>{loadCurrentData(id); canvas.renderAll();},{scaleX:ratio,scaleY:ratio});
     });
-    hideLoading();
 }
 
-let statusTimeout;
 function setStatus(msg, timeout = 2000) {
     const status = document.getElementById('status-bar');
     status.innerText = msg;
-
-    if (statusTimeout) clearTimeout(statusTimeout);
-
-    if (timeout) {
-        statusTimeout = setTimeout(() => {
-            status.innerText = "Система готова";
-            statusTimeout = null;
-        }, timeout);
-    }
+    if (timeout) setTimeout(() => status.innerText = "Система готова", timeout);
 }
     
 
@@ -428,6 +376,3 @@ window.gisLoaded=gisLoaded;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
-
-
-
