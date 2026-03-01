@@ -80,6 +80,7 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 </div>
 <input type="file" id="fileInp" accept="image/*" multiple style="display:none">
 
+
 <script>
 const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
 const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo';
@@ -88,7 +89,6 @@ const SCOPES = "https://www.googleapis.com/auth/drive.file";
 let canvas=null, tokenClient=null, accessToken=localStorage.getItem('at');
 let rootId=null, currentFolderId=null, currentPhotoId=null;
 let isDrawingMode=false, firstPoint=null;
-
 let photoCache={}, lineDataCache={}, offlineLineCache={};
 
 // --- DEBOUNCE ---
@@ -107,7 +107,7 @@ function setStatus(msg, timeout=1000){
     if(timeout>0) setTimeout(()=>{s.innerText="Система готова";},timeout);
 }
 
-// --- OFFLINE CACHE ---
+// ---------------- OFFLINE CACHE ----------------
 const offlineCacheKey='laser_offline_cache';
 function loadOfflineCache(){
     const data=localStorage.getItem(offlineCacheKey);
@@ -116,13 +116,31 @@ function loadOfflineCache(){
 function saveOfflineCache(){ localStorage.setItem(offlineCacheKey, JSON.stringify(lineDataCache)); }
 loadOfflineCache();
 
-// --- GOOGLE API ---
+// ---------------- START APP ----------------
+async function startApp(){
+    if(!accessToken || !gapi.client) return;
+    gapi.client.setToken({access_token:accessToken});
+    document.getElementById('authBtn').innerText="✅ ONLINE";
+    initCanvas();
+    try{
+        const res=await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
+        rootId=res.result.files.length?res.result.files[0].id:
+            (await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
+        loadProjects();
+    }catch(err){ console.error(err); setStatus("❌ Помилка старту",3000); }
+}
+
+// ---------------- GOOGLE API ----------------
 function gapiLoaded(){
     gapi.load('client', async ()=>{
-        await gapi.client.init({apiKey:API_KEY,discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]});
-        if(accessToken) startApp();
+        await gapi.client.init({
+            apiKey:API_KEY,
+            discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
+        });
+        if(accessToken && typeof startApp === "function") startApp();
     });
 }
+
 function gisLoaded(){
     tokenClient=google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
@@ -130,26 +148,43 @@ function gisLoaded(){
         callback: (res)=>{ 
             accessToken=res.access_token; 
             localStorage.setItem('at',accessToken); 
-            startApp(); 
+            if(typeof startApp === "function") startApp(); 
         }
     });
-    if(accessToken) startApp();
+    if(accessToken && typeof startApp === "function") startApp();
 }
+
 document.getElementById('authBtn').onclick=()=>tokenClient?.requestAccessToken();
 
-// --- CANVAS INIT ---
+// ---------------- CANVAS ----------------
 function initCanvas(){
     const wrapper=document.getElementById('canvas-wrapper');
     canvas=new fabric.Canvas('c',{width:wrapper.clientWidth,height:wrapper.clientHeight,selection:false,backgroundColor:'#111'});
+    firstPoint=null;
 
     const saveCurrentDataDebounced=debounce(saveCurrentData,500);
 
-    canvas.on('object:moving', e=>{ if(e.target.owner){ updateDimension(e.target.owner); saveCurrentDataDebounced(); } });
-    canvas.on('object:modified', e=>{ if(e.target.owner){ updateDimension(e.target.owner); saveCurrentDataDebounced(); } });
+    canvas.on('object:moving', e=>{
+        const obj=e.target;
+        if(obj.owner){
+            updateDimension(obj.owner);
+            saveCurrentDataDebounced();
+        }
+    });
+    canvas.on('object:modified', e=>{
+        const obj=e.target;
+        if(obj.owner){
+            updateDimension(obj.owner);
+            saveCurrentDataDebounced();
+        }
+    });
 
-    // Панорамування
     canvas.on('mouse:down', opt=>{
-        if(opt.e.altKey){ canvas.isDragging=true; canvas.lastPosX=opt.e.clientX; canvas.lastPosY=opt.e.clientY; }
+        if(opt.e.altKey){
+            canvas.isDragging=true;
+            canvas.lastPosX=opt.e.clientX;
+            canvas.lastPosY=opt.e.clientY;
+        }
     });
     canvas.on('mouse:move', opt=>{
         if(canvas.isDragging){
@@ -157,44 +192,48 @@ function initCanvas(){
             canvas.viewportTransform[4]+=e.clientX-canvas.lastPosX;
             canvas.viewportTransform[5]+=e.clientY-canvas.lastPosY;
             canvas.requestRenderAll();
-            canvas.lastPosX=e.clientX; canvas.lastPosY=e.clientY;
+            canvas.lastPosX=e.clientX;
+            canvas.lastPosY=e.clientY;
         }
     });
     canvas.on('mouse:up', ()=>{ canvas.isDragging=false; });
 
-    // Видалення лінії по double click
     canvas.on("mouse:dblclick", function(opt){
         const obj = opt.target;
         if(obj && obj.owner){
-            canvas.remove(obj.owner.n1,obj.owner.n2,obj.owner.line,obj.owner.text);
+            canvas.remove(obj.owner.n1);
+            canvas.remove(obj.owner.n2);
+            canvas.remove(obj.owner.line);
+            canvas.remove(obj.owner.text);
             canvas.renderAll();
             autoSave();
         }
     });
 }
 
-// --- DIMENSIONS ---
+// ---------------- DIMENSIONS ----------------
 function createDimension(p1, p2, savedValue=null){
     const circleOptions = { radius: 6, fill: '#00d2ff', originX: 'center', originY: 'center' };
-    const c1 = new fabric.Circle({...circleOptions, left: p1.x, top: p1.y});
-    const c2 = new fabric.Circle({...circleOptions, left: p2.x, top: p2.y});
-    const line = new fabric.Line([p1.x,p1.y,p2.x,p2.y], {stroke:'#00d2ff', strokeWidth:2, selectable:false, evented:false});
-    const getDistance = ()=>Math.round(Math.hypot(c2.left-c1.left, c2.top-c1.top));
-    const text = new fabric.Text(savedValue?savedValue+" mm":getDistance()+" mm", { left:(c1.left+c2.left)/2, top:(c1.top+c2.top)/2-10, fontSize:18, fill:'#fff', backgroundColor:'rgba(0,0,0,0.6)', originX:'center', originY:'center', selectable:false, evented:false });
+    const c1 = new fabric.Circle({ ...circleOptions, left: p1.x, top: p1.y });
+    const c2 = new fabric.Circle({ ...circleOptions, left: p2.x, top: p2.y });
+    const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], { stroke: '#00d2ff', strokeWidth: 2, selectable: false, evented: false });
+    function getDistance(){ return Math.round(Math.sqrt(Math.pow(c2.left - c1.left,2) + Math.pow(c2.top - c1.top,2))); }
+    const text = new fabric.Text(savedValue ? savedValue+" mm" : getDistance()+" mm", { left:(p1.x+p2.x)/2, top:(p1.y+p2.y)/2 - 10, fontSize:18, fill:'#ffffff', backgroundColor:'rgba(0,0,0,0.6)', originX:'center', originY:'center', selectable:false, evented:false });
 
     function updateLine(){
-        line.set({x1:c1.left,y1:c1.top,x2:c2.left,y2:c2.top});
-        text.set({left:(c1.left+c2.left)/2, top:(c1.top+c2.top)/2-10});
-        if(!savedValue) text.text=getDistance()+" mm";
+        line.set({x1:c1.left, y1:c1.top, x2:c2.left, y2:c2.top});
+        text.set({left:(c1.left+c2.left)/2, top:(c1.top+c2.top)/2 - 10});
+        if(!savedValue) text.text = getDistance()+" mm";
         canvas.renderAll();
         autoSave();
     }
 
-    c1.on("moving", updateLine); c2.on("moving", updateLine);
-    canvas.add(line,c1,c2,text);
+    c1.on("moving", updateLine);
+    c2.on("moving", updateLine);
 
-    const dimensionGroup = {n1:c1,n2:c2,line,line,text:text};
-    c1.owner=dimensionGroup; c2.owner=dimensionGroup;
+    canvas.add(line, c1, c2, text);
+    const dimensionGroup = { n1:c1, n2:c2, line:line, text:text };
+    c1.owner = dimensionGroup; c2.owner = dimensionGroup;
 }
 
 function updateDimension(o){
@@ -203,89 +242,82 @@ function updateDimension(o){
     o.line.setCoords(); o.text.setCoords(); canvas.renderAll();
 }
 
-// --- SAVE / LOAD ---
+// ---------------- SAVE / LOAD ----------------
 async function saveCurrentData(){
     if(!currentPhotoId || !canvas) return;
-    const scale=canvas.backgroundImage?canvas.backgroundImage.scaleX:1;
-    const data=canvas.getObjects().filter(o=>o.owner&&o===o.owner.n1).map(o=>{
-        return {p1:{x:o.owner.n1.left/scale,y:o.owner.n1.top/scale},p2:{x:o.owner.n2.left/scale,y:o.owner.n2.top/scale},val:o.owner.text.text};
-    });
+    const scale=canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+    const data=canvas.getObjects().filter(o=>o.owner).map(node=>{
+        if(node===node.owner.n1){
+            return {p1:{x:node.owner.n1.left/scale,y:node.owner.n1.top/scale},p2:{x:node.owner.n2.left/scale,y:node.owner.n2.top/scale},val:node.owner.text.text};
+        }
+        return null;
+    }).filter(n=>n);
 
-    offlineLineCache[currentPhotoId]=data; lineDataCache[currentPhotoId]=data;
+    offlineLineCache[currentPhotoId]=data;
+    lineDataCache[currentPhotoId]=data;
     saveOfflineCache();
 
-    if(!navigator.onLine){ setStatus("⚡ Збережено локально (офлайн)",2000); return; }
-    if(!accessToken) return;
+    if(!navigator.onLine) { setStatus("⚡ Збережено локально (офлайн)",2000); return; }
 
+    if(!accessToken) return;
     const fileName=`data_${currentPhotoId}.json`;
     try{
         const res=await gapi.client.drive.files.list({q:`name='${fileName}' and '${currentFolderId}' in parents and trashed=false`});
         const fileContent=JSON.stringify(data);
+
         if(res.result.files.length>0){
-            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${res.result.files[0].id}?uploadType=media`, {method:'PATCH', headers:{'Authorization':'Bearer '+accessToken}, body:fileContent});
-        }else{
-            const meta={name:fileName, parents:[currentFolderId]};
+            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${res.result.files[0].id}?uploadType=media`,{
+                method:'PATCH',headers:{'Authorization':'Bearer '+accessToken},body:fileContent
+            });
+        } else {
+            const meta={name:fileName,parents:[currentFolderId]};
             const form=new FormData();
-            form.append('metadata', new Blob([JSON.stringify(meta)], {type:'application/json'}));
-            form.append('file', new Blob([fileContent], {type:'application/json'}));
-            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST', headers:{'Authorization':'Bearer '+accessToken}, body:form});
+            form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+            form.append('file',new Blob([fileContent],{type:'application/json'}));
+            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+                method:'POST',headers:{'Authorization':'Bearer '+accessToken},body:form
+            });
         }
         setStatus("✅ Збережено на Drive");
-    }catch(e){ console.error(e); setStatus("❌ Помилка збереження",3000); }
+    }catch(err){ console.error(err); setStatus("❌ Помилка збереження",3000); }
 }
 
-function loadCurrentData(photoId){
-    if(!canvas) return;
-    // Очищаємо dimension
-    canvas.getObjects().forEach(obj=>{ if(obj.owner){ canvas.remove(obj.owner.n1,obj.owner.n2,obj.owner.line,obj.owner.text); } });
-    canvas.renderAll();
-
-    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-    const data = offlineLineCache[photoId] || lineDataCache[photoId];
-    if(!data) return;
-
-    data.forEach(p=>{
-        createDimension({x:p.p1.x*scale, y:p.p1.y*scale},{x:p.p2.x*scale, y:p.p2.y*scale},p.val);
-    });
-}
-
-// --- AUTO SAVE ---
-function autoSave(){
-    if(!currentPhotoId || !canvas) return;
-    const imgObj = canvas.getObjects()[0];
-    const scale = imgObj ? imgObj.scaleX : 1;
-    const data=[];
-    canvas.getObjects().forEach(obj=>{ if(obj.owner && obj===obj.owner.n1){ data.push({p1:{x:obj.owner.n1.left/scale,y:obj.owner.n1.top/scale},p2:{x:obj.owner.n2.left/scale,y:obj.owner.n2.top/scale},val:obj.owner.text.text}); } });
-    offlineLineCache[currentPhotoId]=data;
-    localStorage.setItem('laser_offline', JSON.stringify(offlineLineCache));
-}
-
-// --- ONLINE/OFFLINE STATUS ---
-const netDot=document.querySelector('#net-status .dot');
-const netText=document.querySelector('#net-status .text');
-function updateNetStatus(state){
-    if(state==="online"){ netDot.style.background="#18c964"; netText.textContent="ONLINE"; }
-    else if(state==="offline"){ netDot.style.background="#f31260"; netText.textContent="OFFLINE"; }
-    else if(state==="sync"){ netDot.style.background="#f5a524"; netText.textContent="SYNC..."; }
-}
-
+// ---------------- OFFLINE / ONLINE ----------------
 window.addEventListener('online', async()=>{
     updateNetStatus("sync");
-    for(let photoId in offlineLineCache){ currentPhotoId=photoId; await saveCurrentData(); }
-    offlineLineCache={}; localStorage.removeItem('laser_offline');
-    updateNetStatus("online");
+    try{
+        for(let photoId in offlineLineCache){ 
+            currentPhotoId = photoId; 
+            await saveCurrentData(); 
+        }
+        offlineLineCache = {};
+        localStorage.removeItem('laser_offline_cache');
+        updateNetStatus("online");
+    } catch(e){ console.error(e); updateNetStatus("offline"); }
 });
-window.addEventListener('offline', ()=>{ updateNetStatus("offline"); setStatus("⚡ Працюємо офлайн",2000); });
+window.addEventListener('offline', ()=>{ updateNetStatus("offline"); });
 
-// --- INITIAL LOAD ---
-window.onload=function(){
-    const s=document.createElement('script'); s.src="https://apis.google.com/js/api.js"; s.onload=gapiLoaded; document.body.appendChild(s);
-    const gis=document.createElement('script'); gis.src="https://accounts.google.com/gsi/client"; gis.onload=gisLoaded; document.body.appendChild(gis);
-    navigator.onLine ? updateNetStatus("online") : updateNetStatus("offline");
+function updateNetStatus(state){
+    const netDot = document.querySelector('#net-status .dot');
+    const netText = document.querySelector('#net-status .text');
+    if(state === "online"){ netDot.style.background = "#18c964"; netText.textContent = "ONLINE"; }
+    else if(state === "offline"){ netDot.style.background = "#f31260"; netText.textContent = "OFFLINE"; }
+    else if(state === "sync"){ netDot.style.background = "#f5a524"; netText.textContent = "SYNC..."; }
+}
+
+window.onload = function(){
+    const s = document.createElement('script'); s.src = "https://apis.google.com/js/api.js"; s.onload = gapiLoaded; document.body.appendChild(s);
+    const gis = document.createElement('script'); gis.src = "https://accounts.google.com/gsi/client"; gis.onload = gisLoaded; document.body.appendChild(gis);
 };
+
+if(navigator.onLine) updateNetStatus("online"); else updateNetStatus("offline");
+
 </script>
+
+    
 </body>
 </html>
+
 
 
 
