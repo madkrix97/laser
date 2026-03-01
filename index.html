@@ -6,7 +6,10 @@
 <title>LaserApp - Заміри офлайн/онлайн</title>
 <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
 <style>
-:root {--blue:#0A84FF;--bg:#1c1c1e;--item:#2c2c2e;--orange:#FF9500;--red:#FF453A;--green:#30D158;}
+:root {
+    --blue: #0A84FF; --bg: #1c1c1e; --item: #2c2c2e; 
+    --orange: #FF9500; --red: #FF453A; --green: #30D158;
+}
 body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;background:#000;color:white;overflow:hidden;}
 #sidebar {width:260px;background:var(--bg);border-right:1px solid #333;display:flex;flex-direction:column;z-index:10;}
 .sidebar-header {padding:15px;border-bottom:1px solid #333;display:flex;flex-direction:column;gap:8px;}
@@ -51,77 +54,185 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 <input type="file" id="fileInp" accept="image/*" multiple style="display:none">
 
 <script>
-const CLIENT_ID = 'ТУТ_ВАШ_CLIENT_ID';
-const API_KEY = 'ТУТ_ВАШ_API_KEY';
+const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
+const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo';
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
-let canvas, tokenClient, accessToken = localStorage.getItem('at');
+let canvas=null, tokenClient=null, accessToken=localStorage.getItem('at');
 let rootId=null, currentFolderId=null, currentPhotoId=null;
 let isDrawingMode=false, firstPoint=null;
-let photoCache={}, lineDataCache={};
-let offlineLineCache = {};  
-let offlineQueue = JSON.parse(localStorage.getItem('offlineQueue')||"[]");
-const offlineCacheKey = 'laser_offline_cache';
+let photoCache={}, lineDataCache={}, offlineLineCache={};
 
-function loadOfflineCache(){
-    const data = localStorage.getItem(offlineCacheKey);
-    if(data) lineDataCache = JSON.parse(data);
+// --- DEBOUNCE ---
+function debounce(func, wait){
+    let timeout;
+    return function(...args){
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this,args), wait);
+    };
 }
-function saveOfflineCache(){localStorage.setItem(offlineCacheKey, JSON.stringify(lineDataCache));}
-loadOfflineCache();
 
+// --- STATUS BAR ---
 function setStatus(msg, timeout=1000){
     const s=document.getElementById('status-bar');
     s.innerText=msg;
     if(timeout>0) setTimeout(()=>{s.innerText="Система готова";},timeout);
 }
-function debounce(func, wait){let t; return function(...a){clearTimeout(t); t=setTimeout(()=>func.apply(this,a), wait);}}
-async function enqueueOfflineChange(photoId,data){offlineQueue=offlineQueue.filter(i=>i.photoId!==photoId);offlineQueue.push({photoId,data});localStorage.setItem('offlineQueue',JSON.stringify(offlineQueue));}
-async function flushOfflineQueue(){if(!accessToken) return; for(let item of offlineQueue){currentPhotoId=item.photoId; await saveCurrentData(item.data);} offlineQueue=[]; localStorage.setItem('offlineQueue',JSON.stringify(offlineQueue));}
+
+// ---------------- OFFLINE CACHE ----------------
+const offlineCacheKey='laser_offline_cache';
+function loadOfflineCache(){
+    const data=localStorage.getItem(offlineCacheKey);
+    if(data) lineDataCache=JSON.parse(data);
+}
+function saveOfflineCache(){ localStorage.setItem(offlineCacheKey, JSON.stringify(lineDataCache)); }
+loadOfflineCache();
 
 // ---------------- GOOGLE API ----------------
-function gapiLoaded(){gapi.load('client',()=>gapi.client.init({apiKey:API_KEY,discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]}));}
+function gapiLoaded(){
+    gapi.load('client', async ()=>{
+        await gapi.client.init({apiKey:API_KEY,discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]});
+    });
+}
 function gisLoaded(){
-    tokenClient = google.accounts.oauth2.initTokenClient({
+    tokenClient=google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
-        callback: (res)=>{ accessToken=res.access_token; localStorage.setItem('at',accessToken); startApp(); }
+        callback: (res)=>{ 
+            accessToken=res.access_token; 
+            localStorage.setItem('at',accessToken); 
+            startApp(); 
+        }
     });
-    document.getElementById('authBtn').onclick=()=>{ if(tokenClient) tokenClient.requestAccessToken(); else alert("Google API ще не готовий..."); };
     if(accessToken) startApp();
 }
-
-// ---------------- START APP ----------------
-async function startApp(){
-    if(!accessToken) return;
-    if(!gapi.client){setStatus("❌ gapi.client не готовий",3000); return;}
-    gapi.client.setToken({access_token:accessToken});
-    document.getElementById('authBtn').innerText="✅ ONLINE";
-    initCanvas();
-    const res = await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
-    rootId = res.result.files.length?res.result.files[0].id : (await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
-    await loadProjects();
-    await flushOfflineQueue();
-}
+document.getElementById('authBtn').onclick=()=>tokenClient?.requestAccessToken();
 
 // ---------------- CANVAS ----------------
 function initCanvas(){
-    const wrapper = document.getElementById('canvas-wrapper');
-    canvas = new fabric.Canvas('c', {width:wrapper.clientWidth, height:wrapper.clientHeight, selection:false, backgroundColor:'#111'});
-    // --- події canvas ---
-    canvas.on('object:moving', e=>{const o=e.target; if(o.owner){updateDimension(o.owner); saveCurrentDataDebounced();}});
-    canvas.on('object:modified', e=>{const o=e.target; if(o.owner){updateDimension(o.owner); saveCurrentDataDebounced();}});
-    canvas.on('mouse:down', opt=>{if(opt.e.altKey){canvas.isDragging=true;canvas.lastPosX=opt.e.clientX;canvas.lastPosY=opt.e.clientY;}});
-    canvas.on('mouse:move', opt=>{if(canvas.isDragging){const e=opt.e; canvas.viewportTransform[4]+=e.clientX-canvas.lastPosX; canvas.viewportTransform[5]+=e.clientY-canvas.lastPosY; canvas.requestRenderAll(); canvas.lastPosX=e.clientX; canvas.lastPosY=e.clientY; canvas.getObjects().forEach(o=>o.setCoords());}});
-    canvas.on('mouse:up', ()=>{canvas.isDragging=false;});
+    const wrapper=document.getElementById('canvas-wrapper');
+    canvas=new fabric.Canvas('c',{width:wrapper.clientWidth,height:wrapper.clientHeight,selection:false,backgroundColor:'#111'});
+    let firstPoint=null;
+
+    const saveCurrentDataDebounced=debounce(saveCurrentData,500);
+
+    canvas.on('object:moving', e=>{
+        const obj=e.target;
+        if(obj.owner){
+            updateDimension(obj.owner);
+            saveCurrentDataDebounced();
+        }
+    });
+    canvas.on('object:modified', e=>{
+        const obj=e.target;
+        if(obj.owner){
+            updateDimension(obj.owner);
+            saveCurrentDataDebounced();
+        }
+    });
+
+    canvas.on('mouse:down', opt=>{
+        if(opt.e.altKey){
+            canvas.isDragging=true;
+            canvas.lastPosX=opt.e.clientX;
+            canvas.lastPosY=opt.e.clientY;
+        }
+    });
+    canvas.on('mouse:move', opt=>{
+        if(canvas.isDragging){
+            const e=opt.e;
+            canvas.viewportTransform[4]+=e.clientX-canvas.lastPosX;
+            canvas.viewportTransform[5]+=e.clientY-canvas.lastPosY;
+            canvas.requestRenderAll();
+            canvas.lastPosX=e.clientX;
+            canvas.lastPosY=e.clientY;
+        }
+    });
+    canvas.on('mouse:up', ()=>{ canvas.isDragging=false; });
 }
 
-// --- debounce save ---
-const saveCurrentDataDebounced = debounce(async()=>{await saveCurrentData();},500);
+// ---------------- DIMENSIONS ----------------
+function createDimension(p1,p2,val="0.000"){
+    const props={radius:12,fill:'rgba(255,149,0,0.8)',originX:'center',originY:'center',hasControls:false,hasBorders:false,role:'node'};
+    const n1=new fabric.Circle({...props,left:p1.x,top:p1.y});
+    const n2=new fabric.Circle({...props,left:p2.x,top:p2.y});
+    const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y],{stroke:'#FF9500',strokeWidth:3,selectable:false,evented:false});
+    const text=new fabric.Text(val,{fontSize:20,fill:'white',backgroundColor:'black',originX:'center',originY:'center',hasControls:false});
+    const owner={n1,n2,line,text};
+    n1.owner=n2.owner=text.owner=owner;
 
-// ---------------- PROJECTS ----------------
+    text.on('mousedown',()=>{
+        const v=prompt("Розмір:",text.text);
+        if(v){ text.set('text',v); canvas.renderAll(); saveCurrentData(); }
+    });
+
+    canvas.add(line,text,n1,n2);
+    updateDimension(owner);
+    return owner;
+}
+function updateDimension(o){
+    o.line.set({x1:o.n1.left,y1:o.n1.top,x2:o.n2.left,y2:o.n2.top});
+    o.text.set({left:(o.n1.left+o.n2.left)/2,top:(o.n1.top+o.n2.top)/2});
+    o.line.setCoords(); o.text.setCoords(); canvas.renderAll();
+}
+
+// ---------------- SAVE / LOAD ----------------
+async function saveCurrentData(){
+    if(!currentPhotoId || !canvas) return;
+    const scale=canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+    const data=canvas.getObjects().filter(o=>o.role==='node'&&o.owner).map(node=>{
+        if(node===node.owner.n1){
+            return {p1:{x:node.owner.n1.left/scale,y:node.owner.n1.top/scale},p2:{x:node.owner.n2.left/scale,y:node.owner.n2.top/scale},val:node.owner.text.text};
+        }
+        return null;
+    }).filter(n=>n);
+
+    offlineLineCache[currentPhotoId]=data;
+    lineDataCache[currentPhotoId]=data;
+    saveOfflineCache();
+
+    if(!navigator.onLine) { setStatus("⚡ Збережено локально (офлайн)",2000); return; }
+
+    if(!accessToken) return;
+    const fileName=`data_${currentPhotoId}.json`;
+    try{
+        const res=await gapi.client.drive.files.list({q:`name='${fileName}' and '${currentFolderId}' in parents and trashed=false`});
+        const fileContent=JSON.stringify(data);
+
+        if(res.result.files.length>0){
+            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${res.result.files[0].id}?uploadType=media`,{
+                method:'PATCH',headers:{'Authorization':'Bearer '+accessToken},body:fileContent
+            });
+        } else {
+            const meta={name:fileName,parents:[currentFolderId]};
+            const form=new FormData();
+            form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+            form.append('file',new Blob([fileContent],{type:'application/json'}));
+            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+                method:'POST',headers:{'Authorization':'Bearer '+accessToken},body:form
+            });
+        }
+        setStatus("✅ Збережено на Drive");
+    }catch(err){ console.error(err); setStatus("❌ Помилка збереження",3000); }
+}
+
+async function loadCurrentData(photoId){
+    if(!canvas) return;
+    canvas.clear();
+    const scale=canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+    if(lineDataCache[photoId]){
+        lineDataCache[photoId].forEach(p=>createDimension({x:p.p1.x*scale,y:p.p1.y*scale},{x:p.p2.x*scale,y:p.p2.y*scale},p.val));
+    }
+    if(offlineLineCache[photoId]){
+        offlineLineCache[photoId].forEach(p=>createDimension({x:p.p1.x,y:p.p1.y},{x:p.p2.x,y:p.p2.y},p.val));
+        setStatus("⚠️ Підтягнуто локальні офлайн-зміни",2000);
+    }
+}
+
+// ---------------- PROJECTS / PHOTOS ----------------
 async function loadProjects(){
     const list=document.getElementById('project-list'); list.innerHTML="";
+    if(!accessToken) return;
     const res=await gapi.client.drive.files.list({q:`'${rootId}' in parents and trashed=false`,orderBy:'name'});
     res.result.files.forEach(f=>{
         const div=document.createElement('div'); div.className='project-item'; div.innerText="📂 "+f.name;
@@ -129,98 +240,143 @@ async function loadProjects(){
         list.appendChild(div);
     });
 }
-
 async function loadPhotos(){
     const container=document.getElementById('thumbs-container'); container.innerHTML="";
     document.getElementById('photo-strip').style.display='flex';
     const res=await gapi.client.drive.files.list({q:`'${currentFolderId}' in parents and mimeType contains 'image/' and trashed=false`});
-    res.result.files.forEach(async (file,idx)=>{
+    res.result.files.forEach(async(file,idx)=>{
         const img=document.createElement('img'); img.className='thumb';
-        const url = await fetchPhoto(file.id); img.src=url;
+        const url=await fetchPhoto(file.id); img.src=url;
         img.onclick=()=>setMainImg(url,file.id,img);
         container.appendChild(img);
         if(idx===0) setMainImg(url,file.id,img);
     });
 }
-
 async function fetchPhoto(id){
     if(photoCache[id]) return photoCache[id];
     const res=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`,{headers:{'Authorization':'Bearer '+accessToken}});
-    const blob=await res.blob();
-    const url=URL.createObjectURL(blob);
-    photoCache[id]=url;
-    return url;
+    const blob=await res.blob(); const url=URL.createObjectURL(blob);
+    photoCache[id]=url; return url;
 }
-
 async function setMainImg(url,id,thumb){
     currentPhotoId=id;
-    document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active'));
-    thumb.classList.add('active');
+    document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active')); thumb.classList.add('active');
+    if(!canvas) return;
     canvas.clear();
     fabric.Image.fromURL(url,img=>{
         const ratio=Math.min(canvas.width/img.width,canvas.height/img.height);
         canvas.setBackgroundImage(img,canvas.renderAll.bind(canvas),{scaleX:ratio,scaleY:ratio});
-        // підтягуємо офлайн зміни
-        if(offlineLineCache[id]) offlineLineCache[id].forEach(p=>createDimension({x:p.p1.x*ratio,y:p.p1.y*ratio},{x:p.p2.x*ratio,y:p.p2.y*ratio},p.val));
+        loadCurrentData(id);
     });
 }
 
-// --- Створення ліній ---
-function createDimension(p1,p2,val="0.000"){
-    const commonProps={radius:12,fill:'rgba(255,149,0,0.8)',originX:'center',originY:'center',hasControls:false,hasBorders:false,role:'node'};
-    const n1=new fabric.Circle({...commonProps,left:p1.x,top:p1.y});
-    const n2=new fabric.Circle({...commonProps,left:p2.x,top:p2.y});
-    const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y],{stroke:'#FF9500',strokeWidth:3,selectable:false,evented:false});
-    const text=new fabric.Text(val,{fontSize:20,fill:'white',backgroundColor:'black',originX:'center',originY:'center',hasControls:false});
-    const owner={n1,n2,line,text}; n1.owner=n2.owner=text.owner=owner;
-    text.on('mousedown',()=>{const v=prompt("Розмір:",text.text); if(v){text.set('text',v);canvas.renderAll();saveCurrentDataDebounced();}});
-    canvas.add(line,text,n1,n2); updateDimension(owner); return owner;
-}
-
-function updateDimension(o){o.line.set({x1:o.n1.left,y1:o.n1.top,x2:o.n2.left,y2:o.n2.top}); o.text.set({left:(o.n1.left+o.n2.left)/2,top:(o.n1.top+o.n2.top)/2}); o.line.setCoords(); o.text.setCoords(); canvas.renderAll();}
-
-// ---------------- SAVE ----------------
-async function saveCurrentData(){
-    if(!currentPhotoId) return;
-    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-    const data=canvas.getObjects().filter(o=>o.role==='node'&&o.owner).map(node=>{
-        if(node===node.owner.n1) return {p1:{x:node.owner.n1.left/scale,y:node.owner.n1.top/scale},p2:{x:node.owner.n2.left/scale,y:node.owner.n2.top/scale},val:node.owner.text.text};
-        return null;
-    }).filter(n=>n);
-    offlineLineCache[currentPhotoId]=data;
-    saveOfflineCache();
-    setStatus("💾 Збережено",1000);
-    if(!navigator.onLine||!accessToken) return;
-    // синхронізація на Drive можна додати тут
+// ---------------- START APP ----------------
+async function startApp(){
+    if(!accessToken || !gapi.client) return;
+    gapi.client.setToken({access_token:accessToken});
+    document.getElementById('authBtn').innerText="✅ ONLINE";
+    initCanvas();
+    try{
+        const res=await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
+        rootId=res.result.files.length?res.result.files[0].id:(await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
+        loadProjects();
+    }catch(err){ console.error(err); setStatus("❌ Помилка старту",3000); }
 }
 
 // ---------------- BUTTONS ----------------
-document.getElementById('newProjectBtn').onclick=async()=>{
+document.getElementById('newProjectBtn').onclick=async ()=>{
     const name=prompt("Назва об'єкта:");
-    if(name) await gapi.client.drive.files.create({resource:{name:name,mimeType:'application/vnd.google-apps.folder',parents:[rootId]}});
-    await loadProjects();
+    if(name && rootId) await gapi.client.drive.files.create({resource:{name:name,mimeType:'application/vnd.google-apps.folder',parents:[rootId]}});
+    loadProjects();
 };
-document.getElementById('drawModeBtn').onclick=()=>{
-    isDrawingMode=!isDrawingMode; document.getElementById('drawModeBtn').style.background=isDrawingMode?"var(--green)":"var(--orange)";
+document.getElementById('drawModeBtn').onclick=function(){
+    isDrawingMode=!isDrawingMode; this.style.background=isDrawingMode?"var(--green)":"var(--orange)";
     if(isDrawingMode){
-        canvas.on('mouse:down',function(opt){
+        canvas.on('mouse:down', function(opt){
             if(!isDrawingMode) return;
             const pointer=canvas.getPointer(opt.e);
             if(!firstPoint) firstPoint={x:pointer.x,y:pointer.y};
-            else {const secondPoint={x:pointer.x,y:pointer.y}; createDimension(firstPoint,secondPoint,"0.000"); firstPoint=null; saveCurrentDataDebounced();}
+            else{
+                const secondPoint={x:pointer.x,y:pointer.y};
+                createDimension(firstPoint,secondPoint,"0.000");
+                saveCurrentData();
+                firstPoint=null;
+            }
         });
-    } else canvas.off('mouse:down');
+    }else{ canvas.off('mouse:down'); firstPoint=null; }
 };
 document.getElementById('delObjBtn').onclick=()=>{
     const act=canvas.getActiveObject();
-    if(act&&act.owner){canvas.remove(act.owner.n1,act.owner.n2,act.owner.line,act.owner.text);canvas.discardActiveObject().renderAll(); saveCurrentDataDebounced();}
+    if(act && act.owner){
+        canvas.remove(act.owner.n1,act.owner.n2,act.owner.line,act.owner.text);
+        canvas.discardActiveObject().renderAll();
+        saveCurrentData();
+    }
+};
+document.getElementById('exportBtn').onclick=()=>{
+    if(!canvas.backgroundImage) return;
+    const img=canvas.backgroundImage;
+    const exportCanvas=new fabric.StaticCanvas(null,{width:img.width,height:img.height});
+    exportCanvas.setBackgroundImage(img.getSrc(),exportCanvas.renderAll.bind(exportCanvas),{originX:'left',originY:'top'});
+    const s=img.scaleX;
+    canvas.getObjects().forEach(obj=>{
+        if(obj.owner&&obj===obj.owner.n1){
+            const o=obj.owner;
+            const x1=o.n1.left/s,y1=o.n1.top/s,x2=o.n2.left/s,y2=o.n2.top/s;
+            exportCanvas.add(new fabric.Line([x1,y1,x2,y2],{stroke:'#FF9500',strokeWidth:6}));
+            exportCanvas.add(new fabric.Text(o.text.text,{left:(x1+x2)/2,top:(y1+y2)/2,fontSize:40,fill:'white',backgroundColor:'black',originX:'center'}));
+            exportCanvas.add(new fabric.Circle({left:x1,top:y1,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
+            exportCanvas.add(new fabric.Circle({left:x2,top:y2,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
+        }
+    });
+    setTimeout(()=>{
+        const link=document.createElement('a'); link.download=`plan_${Date.now()}.jpg`; link.href=exportCanvas.toDataURL({format:'jpeg',quality:0.95}); link.click();
+    },500);
 };
 
-window.addEventListener('online',async()=>{setStatus("🌐 Інтернет відновлено",2000); for(const id in offlineLineCache){currentPhotoId=id; await saveCurrentData();} offlineLineCache={}; setStatus("✅ Офлайн-синхронізація завершена",3000);});
+// ---------------- ONLINE/OFFLINE EVENTS ----------------
+window.addEventListener('online', async()=>{
+    setStatus("🌐 Інтернет відновлено, синхронізація...");
+    for(let photoId in offlineLineCache){ 
+        currentPhotoId=photoId; 
+        await saveCurrentData(); 
+    }
+    setStatus("✅ Офлайн-зміни синхронізовані",2000);
+});
+window.addEventListener('offline', ()=>{
+    setStatus("⚡ Відключено від інтернету, працюємо офлайн",3000);
+});
 
-window.gapiLoaded=gapiLoaded; window.gisLoaded=gisLoaded;
+// ---------------- FILE UPLOAD ----------------
+document.getElementById('fileInp').onchange=async function(e){
+    const files=e.target.files;
+    if(!files.length || !currentFolderId) return;
+    for(let file of files){
+        const metadata={name:file.name,parents:[currentFolderId]};
+        const form=new FormData();
+        form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+        form.append('file', file);
+        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+            method:'POST',
+            headers:{'Authorization':'Bearer '+accessToken},
+            body: form
+        });
+    }
+    loadPhotos();
+};
+
+// ---------------- INITIAL LOAD ----------------
+window.onload = function(){
+    const s = document.createElement('script');
+    s.src = "https://apis.google.com/js/api.js";
+    s.onload = gapiLoaded;
+    document.body.appendChild(s);
+
+    const gis = document.createElement('script');
+    gis.src = "https://accounts.google.com/gsi/client";
+    gis.onload = gisLoaded;
+    document.body.appendChild(gis);
+};
 </script>
-<script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-<script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
