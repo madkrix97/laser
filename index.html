@@ -108,21 +108,33 @@ async function startApp(){
 function initCanvas(){
     const wrapper=document.getElementById('canvas-wrapper');
     canvas=new fabric.Canvas('c',{width:wrapper.clientWidth,height:wrapper.clientHeight,selection:false,backgroundColor:'#111'});
-    canvas.on('object:moving',e=>{if(e.target.owner) updateDimension(e.target.owner); saveCurrentData();});
-    canvas.on('object:modified',saveCurrentData);
 
-    canvas.on('mouse:down',function(opt){
-        if(canvas.findTarget(opt.e)) return;
-        if(isDrawingMode){
-            const p=canvas.getPointer(opt.e);
-            if(!firstPoint) firstPoint=p;
-            else{createDimension(firstPoint,p); firstPoint=null; saveCurrentData();}
-            return;
-        }
-        this.isDragging=true;
-        this.lastPosX=opt.e.clientX||(opt.e.touches?opt.e.touches[0].clientX:0);
-        this.lastPosY=opt.e.clientY||(opt.e.touches?opt.e.touches[0].clientY:0);
-    });
+// --- Оновлена функція збереження з дебаунсом ---
+const saveCurrentDataDebounced = debounce(async function() {
+    await saveCurrentData();           // твоя існуюча функція збереження на Google Drive
+    setStatus("✅ Розмір збережено", 1500);
+}, 500); // 500ms після останньої зміни
+
+// --- Ініціалізація подій canvas ---
+canvas.on('object:moving', (e) => {
+    if (e.target.owner) {
+        updateDimension(e.target.owner);  // завжди оновлюємо лінію
+        saveCurrentDataDebounced();       // зберігаємо через дебаунс
+    }
+});
+    
+    canvas.on('object:modified', saveCurrentDataDebounced);
+
+// --- При натисканні на текст для редагування розміру ---
+text.on('mousedown', () => {
+    const v = prompt("Розмір:", text.text);
+    if (v) { 
+        text.set('text', v); 
+        canvas.renderAll(); 
+        saveCurrentDataDebounced();       // теж через дебаунс
+    }
+});
+    
     canvas.on('mouse:move',function(opt){
         if(this.isDragging){
             const e=opt.e;
@@ -223,19 +235,21 @@ async function saveCurrentData() {
     }
 }
 
-let statusTimeout;
+// --- Дебаунс функція ---
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
 
-function setStatus(msg, timeout = 2000) {
-    const status = document.getElementById('status-bar');
-    status.innerText = msg;
-
-    if (statusTimeout) clearTimeout(statusTimeout);
-
-    if (timeout) {
-        statusTimeout = setTimeout(() => {
-            status.innerText = "Система готова";
-            statusTimeout = null;
-        }, timeout);
+// --- Функція оновлення статус-бару ---
+function setStatus(msg, duration = 1000) {
+    const bar = document.getElementById('status-bar');
+    bar.innerText = msg;
+    if (duration > 0) {
+        setTimeout(() => { bar.innerText = "Система готова"; }, duration);
     }
 }
 
@@ -376,3 +390,4 @@ window.gisLoaded=gisLoaded;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
