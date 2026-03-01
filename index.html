@@ -149,19 +149,28 @@ text.on('mousedown', () => {
     canvas.on('mouse:up',()=>canvas.isDragging=false);
 }
 
-function createDimension(p1,p2,val="0.000"){
-    const common={radius:12,fill:'rgba(255,149,0,0.8)',originX:'center',originY:'center',hasControls:false,hasBorders:false,role:'node'};
-    const n1=new fabric.Circle({...common,left:p1.x,top:p1.y});
-    const n2=new fabric.Circle({...common,left:p2.x,top:p2.y});
-    const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y],{stroke:'#FF9500',strokeWidth:3,selectable:false,evented:false});
-    const text=new fabric.Text(val,{fontSize:20,fill:'white',backgroundColor:'black',originX:'center',originY:'center',hasControls:false});
+function createDimension(p1, p2, val = "0.000") {
+    const common = { radius: 12, fill: 'rgba(255,149,0,0.8)', originX: 'center', originY: 'center', hasControls: false, hasBorders: false, role: 'node' };
+    const n1 = new fabric.Circle({ ...common, left: p1.x, top: p1.y });
+    const n2 = new fabric.Circle({ ...common, left: p2.x, top: p2.y });
+    
+    const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], { stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false });
+    const text = new fabric.Text(val, { fontSize: 20, fill: 'white', backgroundColor: 'black', originX: 'center', originY: 'center', hasControls: false });
 
-    const owner={n1,n2,line,text};
-    n1.owner=n2.owner=text.owner=owner;
+    const owner = { n1, n2, line, text };
+    n1.owner = n2.owner = text.owner = owner;
 
-    text.on('mousedown',()=>{const v=prompt("Розмір:",text.text);if(v){text.set('text',v);canvas.renderAll();saveCurrentData();}});
+    // --- Додаємо подію редагування тексту з дебаунсом ---
+    text.on('mousedown', () => {
+        const v = prompt("Розмір:", text.text);
+        if (v) { 
+            text.set('text', v); 
+            canvas.renderAll(); 
+            saveCurrentDataDebounced(); // дебаунс збереження
+        }
+    });
 
-    canvas.add(line,text,n1,n2);
+    canvas.add(line, text, n1, n2);
     updateDimension(owner);
 }
 
@@ -390,4 +399,5 @@ window.gisLoaded=gisLoaded;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
