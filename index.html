@@ -223,11 +223,20 @@ async function saveCurrentData() {
     }
 }
 
-// Функція для оновлення статусу
+let statusTimeout;
+
 function setStatus(msg, timeout = 2000) {
     const status = document.getElementById('status-bar');
     status.innerText = msg;
-    if (timeout) setTimeout(() => status.innerText = "Система готова", timeout);
+
+    if (statusTimeout) clearTimeout(statusTimeout);
+
+    if (timeout) {
+        statusTimeout = setTimeout(() => {
+            status.innerText = "Система готова";
+            statusTimeout = null;
+        }, timeout);
+    }
 }
 
 async function loadCurrentData(photoId){
@@ -367,4 +376,5 @@ window.gisLoaded=gisLoaded;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
