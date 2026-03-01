@@ -258,16 +258,49 @@ async function fetchPhoto(id){
     const blob=await res.blob(); const url=URL.createObjectURL(blob);
     photoCache[id]=url; return url;
 }
-async function setMainImg(url,id,thumb){
-    currentPhotoId=id;
-    document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active')); thumb.classList.add('active');
-    if(!canvas) return;
-    canvas.clear();
-    fabric.Image.fromURL(url,img=>{
-        const ratio=Math.min(canvas.width/img.width,canvas.height/img.height);
-        canvas.setBackgroundImage(img,canvas.renderAll.bind(canvas),{scaleX:ratio,scaleY:ratio});
-        loadCurrentData(id);
-    });
+async function setMainImg(url, id, thumb){
+    currentPhotoId = id;
+
+    document.querySelectorAll('.thumb')
+        .forEach(t => t.classList.remove('active'));
+    thumb.classList.add('active');
+
+    if (!canvas) return;
+
+    // ❗ Очищаємо тільки об'єкти, НЕ весь canvas
+    canvas.getObjects().forEach(obj => canvas.remove(obj));
+
+    // ВАЖЛИВО: додаємо crossOrigin
+    fabric.Image.fromURL(url, function(img){
+
+        const wrapper = document.getElementById('canvas-wrapper');
+
+        // Автоматичний resize canvas
+        canvas.setWidth(wrapper.clientWidth);
+        canvas.setHeight(wrapper.clientHeight);
+
+        const ratio = Math.min(
+            canvas.width / img.width,
+            canvas.height / img.height
+        );
+
+        img.set({
+            originX: 'center',
+            originY: 'center',
+            left: canvas.width / 2,
+            top: canvas.height / 2,
+            selectable: false,
+            evented: false,
+            scaleX: ratio,
+            scaleY: ratio
+        });
+
+        canvas.setBackgroundImage(img, () => {
+            canvas.renderAll();
+            loadCurrentData(id);
+        });
+
+    }, { crossOrigin: 'anonymous' });
 }
 
 // ---------------- START APP ----------------
@@ -380,3 +413,4 @@ window.onload = function(){
 </script>
 </body>
 </html>
+
