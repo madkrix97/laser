@@ -361,6 +361,43 @@ async function setMainImg(url, id, thumb){
     }, { crossOrigin: 'anonymous' });
 }
 
+function downloadCanvasWithDimensions(filename = null){
+    if(!canvas || !canvas.backgroundImage) return;
+
+    const img = canvas.backgroundImage;
+
+    // Створюємо окремий StaticCanvas того ж розміру, що фон
+    const exportCanvas = new fabric.StaticCanvas(null, { width: img.width, height: img.height });
+
+    // Додаємо фонове фото
+    exportCanvas.setBackgroundImage(img.getSrc(), exportCanvas.renderAll.bind(exportCanvas), { originX: 'left', originY: 'top' });
+
+    const scale = img.scaleX;
+
+    // Додаємо всі розміри (лінії, текст, кружечки)
+    canvas.getObjects().forEach(obj => {
+        if(obj.owner && obj === obj.owner.n1){
+            const o = obj.owner;
+            const x1 = o.n1.left / scale, y1 = o.n1.top / scale;
+            const x2 = o.n2.left / scale, y2 = o.n2.top / scale;
+
+            exportCanvas.add(new fabric.Line([x1, y1, x2, y2], { stroke:'#FF9500', strokeWidth:6 }));
+            exportCanvas.add(new fabric.Text(o.text.text, { 
+                left:(x1+x2)/2, top:(y1+y2)/2, fontSize:40, 
+                fill:'white', backgroundColor:'black', originX:'center' 
+            }));
+            exportCanvas.add(new fabric.Circle({ left:x1, top:y1, radius:10, fill:'#FF9500', originX:'center', originY:'center' }));
+            exportCanvas.add(new fabric.Circle({ left:x2, top:y2, radius:10, fill:'#FF9500', originX:'center', originY:'center' }));
+        }
+    });
+
+    // Генеруємо файл і скачування
+    const link = document.createElement('a');
+    link.download = filename || `plan_${Date.now()}.jpg`;
+    link.href = exportCanvas.toDataURL({ format:'jpeg', quality:0.95 });
+    link.click();
+}
+
 // ---------------- START APP ----------------
 async function startApp(){
     if(!accessToken || !gapi.client) return;
@@ -404,25 +441,8 @@ document.getElementById('delObjBtn').onclick=()=>{
         saveCurrentData();
     }
 };
-document.getElementById('exportBtn').onclick=()=>{
-    if(!canvas.backgroundImage) return;
-    const img=canvas.backgroundImage;
-    const exportCanvas=new fabric.StaticCanvas(null,{width:img.width,height:img.height});
-    exportCanvas.setBackgroundImage(img.getSrc(),exportCanvas.renderAll.bind(exportCanvas),{originX:'left',originY:'top'});
-    const s=img.scaleX;
-    canvas.getObjects().forEach(obj=>{
-        if(obj.owner&&obj===obj.owner.n1){
-            const o=obj.owner;
-            const x1=o.n1.left/s,y1=o.n1.top/s,x2=o.n2.left/s,y2=o.n2.top/s;
-            exportCanvas.add(new fabric.Line([x1,y1,x2,y2],{stroke:'#FF9500',strokeWidth:6}));
-            exportCanvas.add(new fabric.Text(o.text.text,{left:(x1+x2)/2,top:(y1+y2)/2,fontSize:40,fill:'white',backgroundColor:'black',originX:'center'}));
-            exportCanvas.add(new fabric.Circle({left:x1,top:y1,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
-            exportCanvas.add(new fabric.Circle({left:x2,top:y2,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
-        }
-    });
-    setTimeout(()=>{
-        const link=document.createElement('a'); link.download=`plan_${Date.now()}.jpg`; link.href=exportCanvas.toDataURL({format:'jpeg',quality:0.95}); link.click();
-    },500);
+document.getElementById('exportBtn').onclick = () => {
+    downloadCanvasWithDimensions(); // тепер кнопка завантажує фото з усіма розмірами
 };
 
 // ---------------- ONLINE/OFFLINE EVENTS ----------------
@@ -517,6 +537,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
