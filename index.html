@@ -441,8 +441,61 @@ document.getElementById('delObjBtn').onclick=()=>{
         saveCurrentData();
     }
 };
-document.getElementById('exportBtn').onclick = () => {
-    downloadCanvasWithDimensions(); // тепер кнопка завантажує фото з усіма розмірами
+document.getElementById('exportBtn').onclick = async () => {
+    if(!canvas.backgroundImage) return;
+    const bg = canvas.backgroundImage;
+
+    // Отримуємо оригінальні розміри зображення
+    const imgWidth = bg.width;
+    const imgHeight = bg.height;
+
+    // 4 крайні точки canvas (фактично backgroundImage після scale)
+    const left = bg.left - (bg.width * bg.scaleX) / 2;
+    const top = bg.top - (bg.height * bg.scaleY) / 2;
+    const right = bg.left + (bg.width * bg.scaleX) / 2;
+    const bottom = bg.top + (bg.height * bg.scaleY) / 2;
+
+    // Створюємо новий StaticCanvas для експорту
+    const exportCanvas = new fabric.StaticCanvas(null, {width: imgWidth, height: imgHeight});
+
+    // Додаємо фон у повному розмірі
+    fabric.Image.fromURL(bg.getSrc(), (img) => {
+        img.set({originX:'left', originY:'top', left:0, top:0, selectable:false, evented:false, scaleX:1, scaleY:1});
+        exportCanvas.setBackgroundImage(img, exportCanvas.renderAll.bind(exportCanvas));
+
+        // Малюємо всі розміри
+        canvas.getObjects().forEach(obj => {
+            if(obj.owner && obj === obj.owner.n1) {
+                const o = obj.owner;
+
+                // Перерахунок координат відносно країв
+                const x1 = ((o.n1.left - left) / (right - left)) * imgWidth;
+                const y1 = ((o.n1.top - top) / (bottom - top)) * imgHeight;
+                const x2 = ((o.n2.left - left) / (right - left)) * imgWidth;
+                const y2 = ((o.n2.top - top) / (bottom - top)) * imgHeight;
+
+                exportCanvas.add(new fabric.Line([x1,y1,x2,y2], {stroke:'#FF9500', strokeWidth:6}));
+                exportCanvas.add(new fabric.Text(o.text.text, {
+                    left: (x1+x2)/2,
+                    top: (y1+y2)/2,
+                    fontSize: 40,
+                    fill: 'white',
+                    backgroundColor: 'black',
+                    originX: 'center',
+                    originY: 'center'
+                }));
+                exportCanvas.add(new fabric.Circle({left:x1,top:y1,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
+                exportCanvas.add(new fabric.Circle({left:x2,top:y2,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
+            }
+        });
+
+        setTimeout(() => {
+            const link = document.createElement('a');
+            link.download = `plan_${Date.now()}.jpg`;
+            link.href = exportCanvas.toDataURL({format:'jpeg',quality:0.95});
+            link.click();
+        }, 200);
+    }, {crossOrigin:'anonymous'});
 };
 
 // ---------------- ONLINE/OFFLINE EVENTS ----------------
@@ -537,6 +590,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
