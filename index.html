@@ -61,592 +61,159 @@ const SCOPES = "https://www.googleapis.com/auth/drive.file";
 let canvas, tokenClient, accessToken = localStorage.getItem('at');
 let rootId=null, currentFolderId=null, currentPhotoId=null;
 let isDrawingMode=false, firstPoint=null;
-let photoCache={}, lineDataCache={};
+let photoCache={}, lineDataCache={}, offlineLineCache={};
 
-let offlineLineCache = {};  // Зберігає тимчасові зміни ліній по photoId
-let offlineSyncQueue = {};  // Для черги синхронізації після появи інтернету
-
-// Ініціалізація локального offline-кешу
-const offlineCacheKey = 'laser_offline_cache';
-
-// Завантажуємо кеш з localStorage
-function loadOfflineCache() {
-    const data = localStorage.getItem(offlineCacheKey);
-    if (data) {
-        lineDataCache = JSON.parse(data);
-    }
-}
-
-// Зберігаємо кеш у localStorage
-function saveOfflineCache() {
-    localStorage.setItem(offlineCacheKey, JSON.stringify(lineDataCache));
-}
-
-// Викликаємо на старті додатка
+// --- OFFLINE CACHE ---
+const offlineCacheKey='laser_offline_cache';
+function loadOfflineCache(){ const data=localStorage.getItem(offlineCacheKey); if(data) lineDataCache=JSON.parse(data); }
+function saveOfflineCache(){ localStorage.setItem(offlineCacheKey,JSON.stringify(lineDataCache)); }
 loadOfflineCache();
 
-    
-let offlineQueue = JSON.parse(localStorage.getItem('offlineQueue')||"[]");
-
-// ---------------- OFFLINE QUEUE ----------------
-function enqueueOfflineChange(photoId, data){
-    offlineQueue = offlineQueue.filter(i => i.photoId !== photoId);
-    offlineQueue.push({photoId, data});
-    localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
-}
-async function flushOfflineQueue(){
-    if(!accessToken) return;
-    for(let item of offlineQueue){
-        currentPhotoId=item.photoId;
-        await saveCurrentData(item.data);
-    }
-    offlineQueue=[];
-    localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
-}
-
-// ---------------- STATUS BAR ----------------
+// ---------------- STATUS ----------------
 function setStatus(msg, timeout=1000){
     const s=document.getElementById('status-bar');
     s.innerText=msg;
     if(timeout>0) setTimeout(()=>{s.innerText="Система готова";},timeout);
 }
 
-// --- ДЕБАУНС ---
+// ---------------- DEBOUNCE ----------------
 function debounce(func, wait){
     let timeout;
-    return function(...args){
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this,args), wait);
-    };
+    return function(...args){ clearTimeout(timeout); timeout=setTimeout(()=>func.apply(this,args), wait); };
 }
 
 // ---------------- GOOGLE API ----------------
-function gapiLoaded(){gapi.load('client',()=>gapi.client.init({apiKey:API_KEY,discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]}));}
-function gisLoaded(){
+window.gapiLoaded=function(){ gapi.load('client',()=>gapi.client.init({apiKey:API_KEY,discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]})); }
+window.gisLoaded=function(){
     tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
+        client_id: CLIENT_ID, scope: SCOPES,
         callback: (res)=>{ accessToken=res.access_token; localStorage.setItem('at',accessToken); startApp(); }
     });
     if(accessToken) startApp();
 }
 document.getElementById('authBtn').onclick=()=>tokenClient.requestAccessToken();
 
-
-
-window.addEventListener('online', async () => {
-    setStatus("🌐 Інтернет відновлено, синхронізація...");
-    for (let photoId in offlineLineCache) {
-        currentPhotoId = photoId;
-        await saveCurrentData();  // твоя функція збереження на Drive
-        delete offlineLineCache[photoId];  // після успішного збереження
-    }
-    setStatus("✅ Офлайн-зміни синхронізовані", 2000);
-});
-    
 // ---------------- START APP ----------------
 async function startApp(){
     if(!accessToken) return;
     gapi.client.setToken({access_token:accessToken});
     document.getElementById('authBtn').innerText="✅ ONLINE";
     initCanvas();
-    // root folder
+
     const res = await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
-    rootId = res.result.files.length?res.result.files[0].id : (await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
+    rootId = res.result.files.length?res.result.files[0].id:(await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
     loadProjects();
-    flushOfflineQueue();
 }
 
 // ---------------- CANVAS ----------------
-// --- CANVAS INIT ---
 function initCanvas(){
-    const wrapper = document.getElementById('canvas-wrapper');
-    canvas = new fabric.Canvas('c', {
-        width: wrapper.clientWidth,
-        height: wrapper.clientHeight,
-        selection: false,
-        backgroundColor: '#111'
-    });
+    const wrapper=document.getElementById('canvas-wrapper');
+    canvas=new fabric.Canvas('c',{width:wrapper.clientWidth,height:wrapper.clientHeight,selection:false,backgroundColor:'#111'});
 
-    // --- змінні для малювання ---
-    let firstPoint = null;
-    let isDragging = false;
-    let lastPosX, lastPosY;
+    let isDragging=false, lastPosX, lastPosY;
 
-const saveCurrentDataDebounced = debounce(async function() {
-    if (!navigator.onLine) {
-        // Збереження офлайн
-        if(currentPhotoId){
-            const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+    // --- DEBOUNCED SAVE ---
+    const saveCurrentDataDebounced = debounce(async function(){
+        if(!currentPhotoId) return;
+        if(!navigator.onLine){
+            const scale = canvas.backgroundImage?canvas.backgroundImage.scaleX:1;
             offlineLineCache[currentPhotoId] = canvas.getObjects()
-                .filter(o => o.role === 'node' && o.owner)
-                .map(node => {
-                    if(node === node.owner.n1){
-                        return {
-                            p1: { x: node.owner.n1.left / scale, y: node.owner.n1.top / scale },
-                            p2: { x: node.owner.n2.left / scale, y: node.owner.n2.top / scale },
-                            val: node.owner.text.text
-                        };
-                    }
-                    return null;
-                })
-                .filter(n => n);
-            setStatus("⚠️ Збережено локально (офлайн)", 2000);
+                .filter(o=>o.role==='node' && o.owner)
+                .map(node=>({
+                    p1:{x:node.owner.n1.left/scale,y:node.owner.n1.top/scale},
+                    p2:{x:node.owner.n2.left/scale,y:node.owner.n2.top/scale},
+                    val:node.owner.text.text
+                }));
+            setStatus("⚠️ Збережено локально (офлайн)",2000);
+            return;
         }
-        return;
+        await saveCurrentData();
+    },500);
+
+    // --- MOVE OBJECT ---
+    canvas.on('object:moving',e=>{ const obj=e.target; if(obj.owner){ updateDimension(obj.owner); saveCurrentDataDebounced(); } });
+    canvas.on('object:modified',e=>{ const obj=e.target; if(obj.owner){ updateDimension(obj.owner); saveCurrentDataDebounced(); } });
+
+    // --- PAN CANVAS ---
+    canvas.on('mouse:down',opt=>{ const evt=opt.e; if(evt.altKey){ canvas.isDragging=true; canvas.lastPosX=evt.clientX; canvas.lastPosY=evt.clientY; } });
+    canvas.on('mouse:move',opt=>{ if(canvas.isDragging){ const e=opt.e; canvas.viewportTransform[4]+=e.clientX-canvas.lastPosX; canvas.viewportTransform[5]+=e.clientY-canvas.lastPosY; canvas.requestRenderAll(); canvas.lastPosX=e.clientX; canvas.lastPosY=e.clientY; canvas.getObjects().forEach(obj=>obj.setCoords()); } });
+    canvas.on('mouse:up',()=>{ canvas.isDragging=false; });
+
+    // --- CREATE DIMENSION ---
+    function createDimension(p1,p2,val="0.000"){
+        const commonProps={radius:12,fill:'rgba(255,149,0,0.8)',originX:'center',originY:'center',hasControls:false,hasBorders:false,role:'node'};
+        const n1=new fabric.Circle({...commonProps,left:p1.x,top:p1.y});
+        const n2=new fabric.Circle({...commonProps,left:p2.x,top:p2.y});
+        const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y],{stroke:'#FF9500',strokeWidth:3,selectable:false,evented:false});
+        const text=new fabric.Text(val,{fontSize:20,fill:'white',backgroundColor:'black',originX:'center',originY:'center',hasControls:false});
+        const owner={n1,n2,line,text}; n1.owner=n2.owner=text.owner=owner;
+
+        text.on('mousedown',()=>{ const v=prompt("Розмір:",text.text); if(v){ text.set('text',v); canvas.renderAll(); saveCurrentDataDebounced(); } });
+
+        canvas.add(line,text,n1,n2);
+        updateDimension(owner);
+        if(!navigator.onLine){ offlineLineCache[currentPhotoId] = offlineLineCache[currentPhotoId]||[]; offlineLineCache[currentPhotoId].push({p1:{x:n1.left,y:n1.top},p2:{x:n2.left,y:n2.top},val:text.text}); setStatus("⚠️ Збережено локально (офлайн)",2000); } else saveCurrentDataDebounced();
+        return owner;
     }
 
-    // Якщо інтернет є — відправляємо на Drive
-    await saveCurrentData();
-}, 500);
+    function updateDimension(o){ o.line.set({x1:o.n1.left,y1:o.n1.top,x2:o.n2.left,y2:o.n2.top}); o.text.set({left:(o.n1.left+o.n2.left)/2,top:(o.n1.top+o.n2.top)/2}); o.line.setCoords(); o.text.setCoords(); canvas.renderAll(); }
 
-    // --- ПЕРЕМІЩЕННЯ ТОЧОК ---
-const saveCurrentDataDebounced = debounce(saveCurrentData, 500);
-
-// Включаємо перетягування точок та автоматичне оновлення ліній
-canvas.on('object:moving', (e) => {
-    const obj = e.target;
-    if (obj.owner) {
-        // Перераховуємо лінію і текст
-        updateDimension(obj.owner);
-
-        // Зберігаємо зміни (офлайн або онлайн)
-        saveCurrentDataDebounced();
-    }
-});
-
-// Після завершення переміщення або зміни параметрів об'єкта
-canvas.on('object:modified', (e) => {
-    const obj = e.target;
-    if (obj.owner) {
-        updateDimension(obj.owner);
-        saveCurrentDataDebounced();
-    }
-});
-
-// Перетягування фону (drag-pan)
-canvas.on('mouse:down', (opt) => {
-    const evt = opt.e;
-    if (evt.altKey) { // наприклад, утримання Alt для панорамування
-        canvas.isDragging = true;
-        canvas.lastPosX = evt.clientX;
-        canvas.lastPosY = evt.clientY;
-    }
-});
-
-canvas.on('mouse:move', (opt) => {
-    if (canvas.isDragging) {
-        const e = opt.e;
-        canvas.viewportTransform[4] += e.clientX - canvas.lastPosX;
-        canvas.viewportTransform[5] += e.clientY - canvas.lastPosY;
-        canvas.requestRenderAll();
-        canvas.lastPosX = e.clientX;
-        canvas.lastPosY = e.clientY;
-
-        // Після панорамування оновлюємо координати об'єктів
-        canvas.getObjects().forEach(obj => obj.setCoords());
-    }
-});
-
-canvas.on('mouse:up', () => {
-    canvas.isDragging = false;
-});
-const saveCurrentDataDebounced = debounce(()=>{
-    saveCurrentData().catch(()=>{}); // навіть якщо offline, enqueue
-},500);
-
-// --- СТВОРЕННЯ ЛІНІЇ ---
-function createDimension(p1, p2, val = "0.000") {
-    const commonProps = {
-        radius: 12,
-        fill: 'rgba(255,149,0,0.8)',
-        originX: 'center',
-        originY: 'center',
-        hasControls: false,
-        hasBorders: false,
-        role: 'node'
+    // --- DRAW MODE ---
+    document.getElementById('drawModeBtn').onclick=function(){
+        isDrawingMode=!isDrawingMode; this.style.background=isDrawingMode?"var(--green)":"var(--orange)";
+        if(isDrawingMode){
+            canvas.on('mouse:down',function(opt){
+                if(!isDrawingMode) return;
+                const pointer=canvas.getPointer(opt.e);
+                if(!firstPoint){ firstPoint={x:pointer.x,y:pointer.y}; } else {
+                    const secondPoint={x:pointer.x,y:pointer.y};
+                    createDimension(firstPoint,secondPoint,"0.000");
+                    firstPoint=null;
+                }
+            });
+        } else { canvas.off('mouse:down'); firstPoint=null; }
     };
 
-    const n1 = new fabric.Circle({ ...commonProps, left: p1.x, top: p1.y });
-    const n2 = new fabric.Circle({ ...commonProps, left: p2.x, top: p2.y });
-    const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], { stroke: '#FF9500', strokeWidth: 3, selectable: false, evented: false });
-    const text = new fabric.Text(val, { fontSize: 20, fill: 'white', backgroundColor: 'black', originX: 'center', originY: 'center', hasControls: false });
-
-    const owner = { n1, n2, line, text };
-    n1.owner = n2.owner = text.owner = owner;
-
-    // Подія для редагування тексту
-    text.on('mousedown', () => {
-        const v = prompt("Розмір:", text.text);
-        if (v) { 
-            text.set('text', v); 
-            canvas.renderAll(); 
-            saveCurrentDataDebounced();
-        }
-    });
-
-    // Додаємо об’єкти на canvas
-    canvas.add(line, text, n1, n2);
-
-    // Оновлюємо координати лінії та тексту
-    updateDimension(owner);
-
-    // Якщо користувач у офлайн-режимі, зберігаємо у локальний кеш
-    if (!navigator.onLine) {
-        if (!offlineLineCache[currentPhotoId]) offlineLineCache[currentPhotoId] = [];
-        offlineLineCache[currentPhotoId].push({
-            p1: { x: n1.left, y: n1.top },
-            p2: { x: n2.left, y: n2.top },
-            val: text.text
-        });
-        setStatus("⚠️ Збережено локально (офлайн)", 2000);
-    } else {
-        saveCurrentDataDebounced();
-    }
-
-    return owner; // щоб можна було працювати з об'єктом поза функцією
 }
+    
+// ---------------- SAVE CURRENT DATA ----------------
+async function saveCurrentData(){
+    if(!currentPhotoId) return;
+    const scale=canvas.backgroundImage?canvas.backgroundImage.scaleX:1;
+    const data=canvas.getObjects().filter(o=>o.role==='node' && o.owner).map(node=>({p1:{x:node.owner.n1.left/scale,y:node.owner.n1.top/scale},p2:{x:node.owner.n2.left/scale,y:node.owner.n2.top/scale},val:node.owner.text.text}));
+    offlineLineCache[currentPhotoId]=data;
+    setStatus("💾 Збереження...",0);
 
-// --- ОНОВЛЕННЯ ЛІНІЇ ---
-function updateDimension(o){
-    o.line.set({ x1:o.n1.left, y1:o.n1.top, x2:o.n2.left, y2:o.n2.top });
-    o.text.set({ left:(o.n1.left+o.n2.left)/2, top:(o.n1.top+o.n2.top)/2 });
-    o.line.setCoords(); o.text.setCoords(); canvas.renderAll();
-}
+    if(!navigator.onLine){ setStatus("⚡ Офлайн-зміни збережено локально",2000); return; }
 
-// ---------------- SAVE DATA ----------------
-// --- Збереження даних з підтримкою офлайн ---
-async function saveCurrentData() {
-    if (!currentPhotoId) return;
-
-    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-
-    // Збираємо дані всіх ліній
-    const data = canvas.getObjects()
-        .filter(o => o.role === 'node' && o.owner)
-        .map(node => {
-            if (node === node.owner.n1) {
-                return {
-                    p1: { x: node.owner.n1.left / scale, y: node.owner.n1.top / scale },
-                    p2: { x: node.owner.n2.left / scale, y: node.owner.n2.top / scale },
-                    val: node.owner.text.text
-                };
-            }
-            return null;
-        })
-        .filter(n => n);
-
-    // --- зберігаємо локально офлайн ---
-    offlineLineCache[currentPhotoId] = data;
-
-    setStatus("💾 Збереження...", 0);
-
-    if (!navigator.onLine) {
-        setStatus("⚡ Офлайн-зміни збережено локально", 2000);
-        return;
-    }
-
-    const fileName = `data_${currentPhotoId}.json`;
-
-    try {
-        // Перевіряємо чи файл вже є на Drive
-        const res = await gapi.client.drive.files.list({ 
-            q: `name='${fileName}' and '${currentFolderId}' in parents and trashed=false` 
-        });
-
-        const fileContent = JSON.stringify(data);
-
-        if (res.result.files.length > 0) {
-            // Оновлюємо існуючий файл
-            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${res.result.files[0].id}?uploadType=media`, {
-                method: 'PATCH',
-                headers: { 'Authorization': 'Bearer ' + accessToken },
-                body: fileContent
-            });
+    const fileName=`data_${currentPhotoId}.json`;
+    try{
+        const res=await gapi.client.drive.files.list({q:`name='${fileName}' and '${currentFolderId}' in parents and trashed=false`});
+        const fileContent=JSON.stringify(data);
+        if(res.result.files.length>0){
+            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${res.result.files[0].id}?uploadType=media`,{method:'PATCH',headers:{'Authorization':'Bearer '+accessToken},body:fileContent});
         } else {
-            // Створюємо новий файл
-            const meta = { name: fileName, parents: [currentFolderId] };
-            const form = new FormData();
-            form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
-            form.append('file', new Blob([fileContent], { type: 'application/json' }));
-
-            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + accessToken },
-                body: form
-            });
+            const meta={name:fileName,parents:[currentFolderId]};
+            const form=new FormData(); form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'})); form.append('file',new Blob([fileContent],{type:'application/json'}));
+            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{'Authorization':'Bearer '+accessToken},body:form});
         }
-
         setStatus("✅ Розмір збережено на Drive");
-
-        // Після успішного збереження в Drive очищаємо офлайн-кеш
         delete offlineLineCache[currentPhotoId];
-
-    } catch (err) {
-        console.error("Помилка збереження:", err);
-        setStatus("❌ Помилка збереження", 3000);
-    }
+    } catch(err){ console.error(err); setStatus("❌ Помилка збереження",3000); }
 }
 
-// ---------------- LOAD DATA ----------------
-async function loadCurrentData(photoId){
-    const fileName = `data_${photoId}.json`;
-    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-
-    canvas.clear(); // чистимо canvas перед завантаженням
-    if(lineDataCache[photoId]){
-        // Завантажуємо з кешу
-        lineDataCache[photoId].forEach(p => 
-            createDimension({x: p.p1.x * scale, y: p.p1.y * scale}, {x: p.p2.x * scale, y: p.p2.y * scale}, p.val)
-        );
-    } else {
-        try {
-            const res = await gapi.client.drive.files.list({
-                q: `name='${fileName}' and '${currentFolderId}' in parents and trashed=false`
-            });
-
-            let points = [];
-            if(res.result.files.length > 0){
-                const dataRes = await fetch(`https://www.googleapis.com/drive/v3/files/${res.result.files[0].id}?alt=media`, {
-                    headers: {'Authorization': 'Bearer ' + accessToken}
-                });
-                points = await dataRes.json();
-                lineDataCache[photoId] = points;
-            }
-
-            // Створюємо лінії на canvas
-            points.forEach(p =>
-                createDimension({x: p.p1.x * scale, y: p.p1.y * scale}, {x: p.p2.x * scale, y: p.p2.y * scale}, p.val)
-            );
-        } catch (err) {
-            console.warn("Помилка завантаження з Drive, можливо офлайн:", err);
-        }
-    }
-
-    // --- Підтягуємо офлайн-дані, якщо вони є ---
-    if(offlineLineCache[photoId]){
-        offlineLineCache[photoId].forEach(p =>
-            createDimension({x: p.p1.x, y: p.p1.y}, {x: p.p2.x, y: p.p2.y}, p.val)
-        );
-        setStatus("⚠️ Підтягнуто локальні офлайн-зміни", 2000);
-    }
-}
-
-// ---------------- PHOTO CACHE ----------------
-async function fetchPhoto(id){
-    if(photoCache[id]) return photoCache[id];
-    const res=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`,{headers:{'Authorization':'Bearer '+accessToken}});
-    const blob=await res.blob();
-    const url=URL.createObjectURL(blob);
-    photoCache[id]=url;
-    return url;
-}
-
-// ---------------- EXPORT ----------------
-function exportImage(){
-    if(!canvas.backgroundImage) return;
-    const img=canvas.backgroundImage;
-    const exportCanvas=new fabric.StaticCanvas(null,{width:img.width,height:img.height});
-    exportCanvas.setBackgroundImage(img.getSrc(),exportCanvas.renderAll.bind(exportCanvas),{originX:'left',originY:'top'});
-    const s=img.scaleX;
-    canvas.getObjects().forEach(obj=>{
-        if(obj.owner&&obj===obj.owner.n1){
-            const o=obj.owner;
-            const x1=o.n1.left/s,y1=o.n1.top/s,x2=o.n2.left/s,y2=o.n2.top/s;
-            exportCanvas.add(new fabric.Line([x1,y1,x2,y2],{stroke:'#FF9500',strokeWidth:6}));
-            exportCanvas.add(new fabric.Text(o.text.text,{left:(x1+x2)/2,top:(y1+y2)/2,fontSize:40,fill:'white',backgroundColor:'black',originX:'center'}));
-            exportCanvas.add(new fabric.Circle({left:x1,top:y1,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
-            exportCanvas.add(new fabric.Circle({left:x2,top:y2,radius:10,fill:'#FF9500',originX:'center',originY:'center'}));
-        }
-    });
-    setTimeout(()=>{
-        const link=document.createElement('a');
-        link.download=`plan_${Date.now()}.jpg`;
-        link.href=exportCanvas.toDataURL({format:'jpeg',quality:0.95});
-        link.click();
-    },500);
-}
-
-// ---------------- PROJECTS & PHOTOS ----------------
-async function loadProjects(){
-    const list=document.getElementById('project-list'); list.innerHTML="";
-    const res=await gapi.client.drive.files.list({q:`'${rootId}' in parents and trashed=false`,orderBy:'name'});
-    res.result.files.forEach(f=>{
-        const div=document.createElement('div'); div.className='project-item'; div.innerText="📂 "+f.name;
-        div.onclick=()=>{currentFolderId=f.id; loadPhotos();}
-        list.appendChild(div);
-    });
-}
-async function loadPhotos(){
-    const container=document.getElementById('thumbs-container'); container.innerHTML="";
-    document.getElementById('photo-strip').style.display='flex';
-    const res=await gapi.client.drive.files.list({q:`'${currentFolderId}' in parents and mimeType contains 'image/' and trashed=false`});
-    res.result.files.forEach(async (file,idx)=>{
-        const img=document.createElement('img'); img.className='thumb';
-        const url=await fetchPhoto(file.id);
-        img.src=url; img.onclick=()=>setMainImg(url,file.id,img);
-        container.appendChild(img);
-        if(idx===0) setMainImg(url,file.id,img);
-    });
-}
-async function setMainImg(url, id, thumb){
-    currentPhotoId = id;
-    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
-    thumb.classList.add('active');
-
-    // Очищаємо канвас
-    canvas.clear();
-
-    // Завантажуємо фон
-    fabric.Image.fromURL(url, async img => {
-        const ratio = Math.min(canvas.width / img.width, canvas.height / img.height);
-        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), { scaleX: ratio, scaleY: ratio });
-
-        // --- Відновлення офлайн змін ---
-        if (offlineLineCache[id]) {
-            offlineLineCache[id].forEach(p => 
-                createDimension({x: p.p1.x * ratio, y: p.p1.y * ratio}, {x: p.p2.x * ratio, y: p.p2.y * ratio}, p.val)
-            );
-            setStatus("⚡ Відновлено офлайн-зміни");
-        } else if (lineDataCache[id]) {
-            // Відновлення з кешу Drive
-            lineDataCache[id].forEach(p => 
-                createDimension({x: p.p1.x * ratio, y: p.p1.y * ratio}, {x: p.p2.x * ratio, y: p.p2.y * ratio}, p.val)
-            );
-            setStatus("✅ Дані з кешу Drive");
-        } else {
-            // Завантаження з Drive, якщо нічого не в кеші
-            try {
-                await loadCurrentData(id);
-            } catch (err) {
-                console.warn("Не вдалося підвантажити дані з Drive:", err);
-                setStatus("⚠️ Дані з Drive недоступні", 3000);
-            }
-        }
-    });
-}
-
-// ---------------- BUTTONS ----------------
-document.getElementById('newProjectBtn').onclick=async ()=>{
-    const name=prompt("Назва об'єкта:");
-    if(name) await gapi.client.drive.files.create({resource:{name:name,mimeType:'application/vnd.google-apps.folder',parents:[rootId]}});
-    loadProjects();
-};
-document.getElementById('fileInp').onchange=async e=>{
-    for(let file of e.target.files){
-        const meta={name:file.name,parents:[currentFolderId]};
-        const form=new FormData();
-        form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
-        form.append('file',file);
-        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{'Authorization':'Bearer '+accessToken},body:form});
-    }
-    loadPhotos();
-};
-document.getElementById('exportBtn').onclick=exportImage;
-
-document.getElementById('drawModeBtn').onclick = function() {
-    isDrawingMode = !isDrawingMode;
-    this.style.background = isDrawingMode ? "var(--green)" : "var(--orange)";
-
-    if(isDrawingMode){
-        canvas.on('mouse:down', function(opt){
-            if(!isDrawingMode) return;
-            const pointer = canvas.getPointer(opt.e);
-            if(!firstPoint){
-                firstPoint = {x: pointer.x, y: pointer.y};
-            } else {
-                const secondPoint = {x: pointer.x, y: pointer.y};
-                createDimension(firstPoint, secondPoint, "0.000");
-
-                // ✅ зберігаємо у кеш одразу
-                if(currentPhotoId){
-                    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-                    const newLine = {
-                        p1: { x: firstPoint.x / scale, y: firstPoint.y / scale },
-                        p2: { x: secondPoint.x / scale, y: secondPoint.y / scale },
-                        val: "0.000"
-                    };
-                    if(!lineDataCache[currentPhotoId]) lineDataCache[currentPhotoId] = [];
-                    lineDataCache[currentPhotoId].push(newLine);
-                    saveOfflineCache(); // локальне збереження
-
-                    // якщо є інтернет та токен, синхронізуємо на Drive
-                    if(navigator.onLine && accessToken){
-                        saveCurrentData(); 
-                    }
-                }
-
-                firstPoint = null;
-            }
-        });
-    } else {
-        canvas.off('mouse:down'); // зупиняємо режим малювання
-        firstPoint = null;
-    }
-};
-
-
-    
-document.getElementById('delObjBtn').onclick=()=>{
-
-const act = canvas.getActiveObject();
-if(act && act.owner){
-    // Видаляємо з канвасу
-    canvas.remove(act.owner.n1, act.owner.n2, act.owner.line, act.owner.text);
-    canvas.discardActiveObject().renderAll();
-
-    // ✅ видаляємо з локального кешу
-    if(currentPhotoId && lineDataCache[currentPhotoId]){
-        lineDataCache[currentPhotoId] = lineDataCache[currentPhotoId].filter(l =>
-            !(l.p1.x === act.owner.n1.left && l.p1.y === act.owner.n1.top &&
-              l.p2.x === act.owner.n2.left && l.p2.y === act.owner.n2.top)
-        );
-        saveOfflineCache();
-        if(navigator.onLine && accessToken) saveCurrentData();
-    }
-}
-
-    
-};
-document.getElementById('refreshCacheBtn').onclick=async()=>{
-    if(currentPhotoId){
-        photoCache[currentPhotoId]=null;
-        lineDataCache[currentPhotoId]=null;
-        await loadCurrentData(currentPhotoId);
-        const container=document.querySelector('.thumb.active');
-        if(container){
-            const url=await fetchPhoto(currentPhotoId);
-            setMainImg(url,currentPhotoId,container);
-        }
-    }
-};
-
-// ---------------- WINDOW EVENTS ----------------
-window.addEventListener('online', async () => {
-    setStatus("🌐 Інтернет з’явився, синхронізація офлайн-змін...", 2000);
-
-    for(const photoId in offlineLineCache){
-        // Відновлюємо дані в main canvas (не обов’язково, але можна)
-        lineDataCache[photoId] = offlineLineCache[photoId];
-        currentPhotoId = photoId;
-        await saveCurrentData(); // синхронізуємо на Drive
-    }
-
-    offlineLineCache = {}; // очищаємо локальний кеш
-    setStatus("✅ Офлайн-зміни синхронізовано на Drive", 3000);
+// ---------------- ONLINE EVENT ----------------
+window.addEventListener('online', async()=>{
+    setStatus("🌐 Інтернет відновлено, синхронізація офлайн-змін...",2000);
+    for(let photoId in offlineLineCache){ currentPhotoId=photoId; lineDataCache[photoId]=offlineLineCache[photoId]; await saveCurrentData(); }
+    offlineLineCache={}; setStatus("✅ Офлайн-зміни синхронізовано на Drive",3000);
 });
 
 // ---------------- INIT ----------------
-window.gapiLoaded=gapiLoaded;
-window.gisLoaded=gisLoaded;
+window.addEventListener('resize',()=>{ if(canvas){ canvas.setWidth(window.innerWidth-260); canvas.setHeight(window.innerHeight); canvas.renderAll(); } });
+window.gapiLoaded=gapiLoaded; window.gisLoaded=gisLoaded;
 </script>
 <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
-
-
-
-
-
-
