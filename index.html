@@ -216,17 +216,46 @@ async function saveCurrentData(){
     }catch(err){ console.error(err); setStatus("❌ Помилка збереження",3000); }
 }
 
-async function loadCurrentData(photoId){
+function loadCurrentData(photoId){
     if(!canvas) return;
-    canvas.clear();
-    const scale=canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
-    if(lineDataCache[photoId]){
-        lineDataCache[photoId].forEach(p=>createDimension({x:p.p1.x*scale,y:p.p1.y*scale},{x:p.p2.x*scale,y:p.p2.y*scale},p.val));
-    }
+
+    // ❗ очищаємо тільки dimension об'єкти
+    canvas.getObjects().forEach(obj=>{
+        if(obj.owner){
+            canvas.remove(obj.owner.n1);
+            canvas.remove(obj.owner.n2);
+            canvas.remove(obj.owner.line);
+            canvas.remove(obj.owner.text);
+        }
+    });
+
+    canvas.renderAll();
+
+    const scale = canvas.backgroundImage 
+        ? canvas.backgroundImage.scaleX 
+        : 1;
+
+    // ✅ ГОЛОВНА ЛОГІКА БЕЗ ДУБЛІВ
+    let data = null;
+
     if(offlineLineCache[photoId]){
-        offlineLineCache[photoId].forEach(p=>createDimension({x:p.p1.x,y:p.p1.y},{x:p.p2.x,y:p.p2.y},p.val));
-        setStatus("⚠️ Підтягнуто локальні офлайн-зміни",2000);
+        data = offlineLineCache[photoId];
+        setStatus("⚡ Використано локальні зміни",1500);
+    } else if(lineDataCache[photoId]){
+        data = lineDataCache[photoId];
     }
+
+    if(!data) return;
+
+    data.forEach(p=>{
+        createDimension(
+            {x:p.p1.x*scale, y:p.p1.y*scale},
+            {x:p.p2.x*scale, y:p.p2.y*scale},
+            p.val
+        );
+    });
+
+    canvas.renderAll();
 }
 
 // ---------------- PROJECTS / PHOTOS ----------------
@@ -370,11 +399,23 @@ document.getElementById('exportBtn').onclick=()=>{
 // ---------------- ONLINE/OFFLINE EVENTS ----------------
 window.addEventListener('online', async()=>{
     setStatus("🌐 Інтернет відновлено, синхронізація...");
-    for(let photoId in offlineLineCache){ 
-        currentPhotoId=photoId; 
-        await saveCurrentData(); 
+
+    try{
+        for(let photoId in offlineLineCache){ 
+            currentPhotoId = photoId; 
+            await saveCurrentData(); 
+        }
+
+        // ✅ ОЧИЩАЄМО тільки після успішного збереження
+        offlineLineCache = {};
+        localStorage.removeItem('laser_offline');
+
+        setStatus("✅ Офлайн-зміни синхронізовані",2000);
+
+    } catch(e){
+        console.error("Sync error:", e);
+        setStatus("⚠️ Помилка синхронізації",3000);
     }
-    setStatus("✅ Офлайн-зміни синхронізовані",2000);
 });
 window.addEventListener('offline', ()=>{
     setStatus("⚡ Відключено від інтернету, працюємо офлайн",3000);
@@ -413,4 +454,5 @@ window.onload = function(){
 </script>
 </body>
 </html>
+
 
