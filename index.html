@@ -85,9 +85,9 @@ async function loadPhotos(folderId) {
     const photosDiv = document.getElementById('photos');
     photosDiv.innerHTML = "";
 
-    const res = await gapi.client.drive.files.list({
-        q:`'${folderId}' in parents and mimeType contains 'image/' and trashed=false`
-    });
+const res = await gapi.client.drive.files.list({
+    q:`'${folderId}' in parents and (mimeType='image/jpeg' or mimeType='image/png') and trashed=false`
+});
 
     for(const file of res.result.files){
         const img = document.createElement('img');
@@ -113,3 +113,4 @@ window.gisLoaded = gisLoaded;
 
 </body>
 </html>
+
