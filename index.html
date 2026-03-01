@@ -250,6 +250,20 @@ function createDimension(p1, p2, val="0.000"){
     });
 
     canvas.add(line, text, n1, n2);
+
+// Додаємо нову лінію до кешу якщо офлайн
+if(currentPhotoId){
+    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+    const newLine = {
+        p1: { x: n1.left / scale, y: n1.top / scale },
+        p2: { x: n2.left / scale, y: n2.top / scale },
+        val: text.text
+    };
+    if(!lineDataCache[currentPhotoId]) lineDataCache[currentPhotoId] = [];
+    lineDataCache[currentPhotoId].push(newLine);
+    saveOfflineCache();
+}
+    
     updateDimension(owner);
 }
 
@@ -424,10 +438,71 @@ document.getElementById('fileInp').onchange=async e=>{
     loadPhotos();
 };
 document.getElementById('exportBtn').onclick=exportImage;
-document.getElementById('drawModeBtn').onclick=function(){isDrawingMode=!isDrawingMode; this.style.background=isDrawingMode?"var(--green)":"var(--orange)";};
+
+document.getElementById('drawModeBtn').onclick = function() {
+    isDrawingMode = !isDrawingMode;
+    this.style.background = isDrawingMode ? "var(--green)" : "var(--orange)";
+
+    if(isDrawingMode){
+        canvas.on('mouse:down', function(opt){
+            if(!isDrawingMode) return;
+            const pointer = canvas.getPointer(opt.e);
+            if(!firstPoint){
+                firstPoint = {x: pointer.x, y: pointer.y};
+            } else {
+                const secondPoint = {x: pointer.x, y: pointer.y};
+                createDimension(firstPoint, secondPoint, "0.000");
+
+                // ✅ зберігаємо у кеш одразу
+                if(currentPhotoId){
+                    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+                    const newLine = {
+                        p1: { x: firstPoint.x / scale, y: firstPoint.y / scale },
+                        p2: { x: secondPoint.x / scale, y: secondPoint.y / scale },
+                        val: "0.000"
+                    };
+                    if(!lineDataCache[currentPhotoId]) lineDataCache[currentPhotoId] = [];
+                    lineDataCache[currentPhotoId].push(newLine);
+                    saveOfflineCache(); // локальне збереження
+
+                    // якщо є інтернет та токен, синхронізуємо на Drive
+                    if(navigator.onLine && accessToken){
+                        saveCurrentData(); 
+                    }
+                }
+
+                firstPoint = null;
+            }
+        });
+    } else {
+        canvas.off('mouse:down'); // зупиняємо режим малювання
+        firstPoint = null;
+    }
+};
+
+
+    
 document.getElementById('delObjBtn').onclick=()=>{
-    const act=canvas.getActiveObject();
-    if(act&&act.owner){canvas.remove(act.owner.n1,act.owner.n2,act.owner.line,act.owner.text);canvas.discardActiveObject().renderAll();saveCurrentData();}};
+
+const act = canvas.getActiveObject();
+if(act && act.owner){
+    // Видаляємо з канвасу
+    canvas.remove(act.owner.n1, act.owner.n2, act.owner.line, act.owner.text);
+    canvas.discardActiveObject().renderAll();
+
+    // ✅ видаляємо з локального кешу
+    if(currentPhotoId && lineDataCache[currentPhotoId]){
+        lineDataCache[currentPhotoId] = lineDataCache[currentPhotoId].filter(l =>
+            !(l.p1.x === act.owner.n1.left && l.p1.y === act.owner.n1.top &&
+              l.p2.x === act.owner.n2.left && l.p2.y === act.owner.n2.top)
+        );
+        saveOfflineCache();
+        if(navigator.onLine && accessToken) saveCurrentData();
+    }
+}
+
+    
+};
 document.getElementById('refreshCacheBtn').onclick=async()=>{
     if(currentPhotoId){
         photoCache[currentPhotoId]=null;
@@ -455,6 +530,7 @@ window.gisLoaded=gisLoaded;
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
 
 
 
