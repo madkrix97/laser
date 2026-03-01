@@ -270,9 +270,14 @@ function loadCurrentData(photoId){
 
     canvas.renderAll();
 
-    const scale = canvas.backgroundImage 
-        ? canvas.backgroundImage.scaleX 
-        : 1;
+    const bg = canvas.backgroundImage;
+    if(!bg) return;
+
+    // Обчислюємо офсет та масштаб для поточного фону
+    const scaleX = bg.scaleX;
+    const scaleY = bg.scaleY;
+    const offsetX = bg.left - (bg.width * scaleX) / 2;
+    const offsetY = bg.top - (bg.height * scaleY) / 2;
 
     // ✅ ГОЛОВНА ЛОГІКА БЕЗ ДУБЛІВ
     let data = null;
@@ -287,11 +292,13 @@ function loadCurrentData(photoId){
     if(!data) return;
 
     data.forEach(p=>{
-        createDimension(
-            {x:p.p1.x*scale, y:p.p1.y*scale},
-            {x:p.p2.x*scale, y:p.p2.y*scale},
-            p.val
-        );
+        // Конвертуємо координати з оригінального зображення в канвасні
+        const x1 = p.p1.x * scaleX + offsetX;
+        const y1 = p.p1.y * scaleY + offsetY;
+        const x2 = p.p2.x * scaleX + offsetX;
+        const y2 = p.p2.y * scaleY + offsetY;
+
+        createDimension({x:x1,y:y1},{x:x2,y:y2},p.val);
     });
 
     canvas.renderAll();
@@ -614,6 +621,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
