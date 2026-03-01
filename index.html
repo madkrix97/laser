@@ -315,6 +315,8 @@ async function fetchPhoto(id){
     photoCache[id]=url; return url;
 }
 async function setMainImg(url, id, thumb){
+
+    if(canvas) await saveCurrentData(); // ✅ зберегти поточне перед очищенням
     currentPhotoId = id;
 
     document.querySelectorAll('.thumb')
@@ -515,6 +517,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
