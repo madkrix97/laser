@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LaserApp Projects Test</title>
+<title>LaserApp Projects</title>
 <style>
 body { font-family: sans-serif; background:#111; color:white; padding:20px; }
 button { padding:10px 20px; margin:5px; border:none; border-radius:5px; cursor:pointer; }
-.project { margin:10px 0; cursor:pointer; }
+#loading { color: #0A84FF; margin-bottom:10px; display:none; }
+.project { margin:10px 0; cursor:pointer; padding:8px; border-radius:6px; background:#222; }
+.project:hover { background:#333; }
 .photo { width:80px; height:80px; object-fit:cover; margin:3px; border-radius:5px; cursor:pointer; border:2px solid transparent; }
 .photo.active { border-color:#0A84FF; }
 #photos { display:flex; flex-wrap:wrap; }
@@ -16,8 +18,12 @@ button { padding:10px 20px; margin:5px; border:none; border-radius:5px; cursor:p
 <body>
 
 <button id="authBtn">🔑 Авторизувати Google Drive</button>
+<button id="refreshCacheBtn">🔄 Оновити кеш</button>
+<div id="loading">Завантаження...</div>
+
 <h2>Проекти:</h2>
 <div id="projects"></div>
+
 <h2>Фото:</h2>
 <div id="photos"></div>
 
@@ -28,6 +34,9 @@ const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let tokenClient, accessToken=null;
 let rootId=null, currentFolderId=null;
+
+// Кеш: ключ = id проекту, значення = масив {id: photoId, url: objectURL}
+const photoCache = {};
 
 function gapiLoaded() {
     gapi.load('client', async () => {
@@ -49,12 +58,18 @@ function gisLoaded() {
 }
 
 document.getElementById('authBtn').onclick = () => tokenClient.requestAccessToken();
+document.getElementById('refreshCacheBtn').onclick = () => {
+    if(currentFolderId) {
+        delete photoCache[currentFolderId];
+        loadPhotos(currentFolderId);
+    }
+}
 
 async function loadProjects() {
     gapi.client.setToken({ access_token: accessToken });
     const projectsDiv = document.getElementById('projects');
 
-    // 1️⃣ Знайти або створити LaserApp
+    // Знайти або створити LaserApp
     let res = await gapi.client.drive.files.list({
         q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"
     });
@@ -67,7 +82,7 @@ async function loadProjects() {
         rootId = newFolder.result.id;
     }
 
-    // 2️⃣ Підпапки → проекти
+    // Підпапки → проекти
     res = await gapi.client.drive.files.list({ q:`'${rootId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` });
     projectsDiv.innerHTML = "";
 
@@ -83,18 +98,41 @@ async function loadProjects() {
 async function loadPhotos(folderId) {
     currentFolderId = folderId;
     const photosDiv = document.getElementById('photos');
+    const loadingDiv = document.getElementById('loading');
+    
     photosDiv.innerHTML = "";
+    loadingDiv.style.display = "block";
 
-const res = await gapi.client.drive.files.list({
-    q:`'${folderId}' in parents and (mimeType='image/jpeg' or mimeType='image/png') and trashed=false`
-});
+    // Використовуємо кеш, якщо він є
+    if(photoCache[folderId]){
+        photoCache[folderId].forEach(p => {
+            const img = document.createElement('img');
+            img.className = 'photo';
+            img.src = p.url;
+            photosDiv.appendChild(img);
+        });
+        loadingDiv.style.display = "none";
+        return;
+    }
+
+    // Інакше підвантажуємо з Google Drive
+    let res = await gapi.client.drive.files.list({
+        q:`'${folderId}' in parents and (mimeType='image/jpeg' or mimeType='image/png') and trashed=false`
+    });
+
+    photoCache[folderId] = [];
 
     for(const file of res.result.files){
+        const url = await fetchPhoto(file.id);
+        photoCache[folderId].push({id: file.id, url});
+
         const img = document.createElement('img');
         img.className = 'photo';
-        img.src = await fetchPhoto(file.id);
+        img.src = url;
         photosDiv.appendChild(img);
     }
+
+    loadingDiv.style.display = "none";
 }
 
 async function fetchPhoto(id){
@@ -113,4 +151,3 @@ window.gisLoaded = gisLoaded;
 
 </body>
 </html>
-
