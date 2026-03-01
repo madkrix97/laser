@@ -254,11 +254,9 @@ async function saveCurrentData(){
         setStatus("✅ Збережено на Drive");
     }catch(err){ console.error(err); setStatus("❌ Помилка збереження",3000); }
 }
-
 function loadCurrentData(photoId){
     if(!canvas) return;
 
-    // ❗ очищаємо тільки dimension об'єкти
     canvas.getObjects().forEach(obj=>{
         if(obj.owner){
             canvas.remove(obj.owner.n1);
@@ -270,28 +268,32 @@ function loadCurrentData(photoId){
     canvas.renderAll();
 
     const bg = canvas.backgroundImage;
-    if(!bg) return; // якщо фон ще не готовий — вихід
+    if(!bg) return;
 
-    // Масштаб та офсет для поточного фону
-    const scaleX = bg.scaleX || 1;
-    const scaleY = bg.scaleY || 1;
-    const offsetX = (bg.left || 0) - (bg.width * scaleX) / 2;
-    const offsetY = (bg.top || 0) - (bg.height * scaleY) / 2;
-
-    // ✅ Вибираємо дані
     let data = offlineLineCache[photoId] || lineDataCache[photoId];
     if(!data) return;
-
     if(offlineLineCache[photoId]) setStatus("⚡ Використано локальні зміни",1500);
 
-    // Відновлюємо розміри на canvas
-    data.forEach(p=>{
-        const x1 = p.p1.x * scaleX + offsetX;
-        const y1 = p.p1.y * scaleY + offsetY;
-        const x2 = p.p2.x * scaleX + offsetX;
-        const y2 = p.p2.y * scaleY + offsetY;
+    // Відновлення точок відносно чотирьох кутів зображення
+    const imgWidth = bg.width;
+    const imgHeight = bg.height;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
 
-        createDimension({x:x1, y:y1}, {x:x2, y:y2}, p.val);
+    // Масштаб для поміщення фото в canvas
+    const scale = Math.min(canvasWidth / imgWidth, canvasHeight / imgHeight);
+
+    // Верхній лівий кут фото на канвасі
+    const offsetX = bg.left - (imgWidth * scale) / 2;
+    const offsetY = bg.top - (imgHeight * scale) / 2;
+
+    data.forEach(p=>{
+        const x1 = p.p1.x * scale + offsetX;
+        const y1 = p.p1.y * scale + offsetY;
+        const x2 = p.p2.x * scale + offsetX;
+        const y2 = p.p2.y * scale + offsetY;
+
+        createDimension({x:x1, y:y1},{x:x2, y:y2},p.val);
     });
 
     canvas.renderAll();
@@ -614,6 +616,7 @@ window.addEventListener('offline', ()=>{
 </script>
 </body>
 </html>
+
 
 
 
