@@ -161,37 +161,26 @@ function initCanvas(){
         backgroundColor: '#111'
     });
 
-    // Універсальний обробник кліку
     canvas.on('mouse:down', (opt) => {
-        // 1. Перевіряємо, чи ми взагалі влучили в якийсь об'єкт
-        if (opt.target) {
-            let targetText = null;
-
-            // Якщо влучили прямо в текст
-            if (opt.target.type === 'text') {
-                targetText = opt.target;
-            } 
-            // Якщо влучили в точку або лінію, шукаємо пов'язаний текст через owner
-            else if (opt.target.owner && opt.target.owner.text) {
-                targetText = opt.target.owner.text;
+        // 1. Перевіряємо, чи ми влучили саме в ТЕКСТ
+        if (opt.target && opt.target.type === 'text') {
+            if (opt.e) opt.e.stopPropagation();
+            
+            const v = prompt("Введіть розмір:", opt.target.text);
+            if (v !== null && v.trim() !== "") {
+                opt.target.set('text', v);
+                canvas.renderAll();
+                saveToLocal();
             }
+            return; // Виходимо, щоб не почалося малювання
+        }
 
-            if (targetText) {
-                // Зупиняємо інші події
-                if (opt.e) opt.e.stopPropagation();
-                
-                // Викликаємо вікно
-                const v = prompt("Введіть розмір:", targetText.text);
-                if (v !== null && v.trim() !== "") {
-                    targetText.set('text', v);
-                    canvas.renderAll();
-                    saveToLocal();
-                }
-                return; // Виходимо, щоб не почалося малювання лінії
-            }
+        // 2. Якщо влучили в ТОЧКУ (Circle), нічого не робимо (даємо Fabric.js її рухати)
+        if (opt.target && opt.target.role === 'node') {
+            return; 
         }
         
-        // Тут продовжується логіка малювання, ЯКЩО ми не влучили в об'єкт
+        // 3. Логіка малювання нової лінії (тільки якщо натиснули на порожнє місце)
         if (isDrawingMode && !opt.target) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
@@ -204,6 +193,7 @@ function initCanvas(){
         }
     });
 
+    // Оновлення ліній при перетягуванні точок
     canvas.on('object:moving', (e) => { 
         if(e.target.owner) updateDimension(e.target.owner); 
     });
@@ -239,11 +229,11 @@ const text = new fabric.Text(val, {
     originX: 'center',
     originY: 'center',
     hasControls: false,
-    selectable: true,  // ЗМІНЕНО: тепер об'єкт можна "вибрати", що полегшує клік
-    evented: true,     
-    padding: 20,
-    lockMovementX: true, // Але забороняємо його рухати окремо від лінії
-    lockMovementY: true
+    selectable: true,      // Дозволяємо вибір для кліку
+    evented: true,
+    lockMovementX: true,   // Забороняємо совати вбік
+    lockMovementY: true,   // Забороняємо совати вгору/вниз
+    padding: 20
 });
 
     const owner = { n1, n2, line, text };
