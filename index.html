@@ -87,17 +87,22 @@ function updateNetStatus(state){
 // ---------------- ЛОКАЛЬНА РОБОТА (КЕШ) ----------------
 
 function saveToLocal() {
-    if (!currentPhotoId || !canvas) return;
-    const scale = canvas.backgroundImage ? canvas.backgroundImage.scaleX : 1;
+    if (!currentPhotoId || !canvas || !canvas.backgroundImage) return;
     
-    // Створюємо масив даних з нульовими координатами (відносно фото)
+    const img = canvas.backgroundImage;
+    const scale = img.scaleX;
+
+    // Рахуємо реальний лівий верхній кут картинки на канвасі
+    const offsetX = (canvas.width / 2) - (img.width * scale / 2);
+    const offsetY = (canvas.height / 2) - (img.height * scale / 2);
+
     const data = canvas.getObjects().filter(o => o.role === 'node' && o.owner).map(node => {
         if (node === node.owner.n1) {
             return {
-                p1: { x: node.owner.n1.left / scale, y: node.owner.n1.top / scale },
-                p2: { x: node.owner.n2.left / scale, y: node.owner.n2.top / scale },
-                val: node.owner.text.text,
-                origin: { x: 0, y: 0 } // Твій запит: початок координат для кожного фото
+                // Віднімаємо зміщення, щоб отримати 0,0 у кутку ФОТО
+                p1: { x: (node.owner.n1.left - offsetX) / scale, y: (node.owner.n1.top - offsetY) / scale },
+                p2: { x: (node.owner.n2.left - offsetX) / scale, y: (node.owner.n2.top - offsetY) / scale },
+                val: node.owner.text.text
             };
         }
         return null;
@@ -105,7 +110,7 @@ function saveToLocal() {
 
     lineDataCache[currentPhotoId] = data;
     localStorage.setItem('laser_offline_cache', JSON.stringify(lineDataCache));
-    setStatus("💾 Збережено локально");
+    setStatus("💾 Координати зафіксовано відносно фото");
 }
 
 // ---------------- РОБОТА З DRIVE (СИНХРОНІЗАЦІЯ) ----------------
@@ -241,22 +246,49 @@ async function fetchPhoto(id){
     photoCache[id]=url; return url;
 }
 
-function setMainImg(url, id, thumb){
-    currentPhotoId=id;
-    document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active'));
+function setMainImg(url, id, thumb) {
+    currentPhotoId = id;
+    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
     thumb.classList.add('active');
-    fabric.Image.fromURL(url, (img)=>{
-        const wrapper=document.getElementById('canvas-wrapper');
-        canvas.setWidth(wrapper.clientWidth); canvas.setHeight(wrapper.clientHeight);
-        const ratio=Math.min(canvas.width/img.width, canvas.height/img.height);
-        img.set({ originX:'center', originY:'center', left:canvas.width/2, top:canvas.height/2, selectable:false, scaleX:ratio, scaleY:ratio });
-        canvas.setBackgroundImage(img, ()=>{ 
-            canvas.getObjects().forEach(o=>canvas.remove(o));
-            const data = lineDataCache[id] || [];
-            data.forEach(p => createDimension({x:p.p1.x*ratio, y:p.p1.y*ratio}, {x:p.p2.x*ratio, y:p.p2.y*ratio}, p.val));
-            canvas.renderAll(); 
+
+    fabric.Image.fromURL(url, (img) => {
+        const wrapper = document.getElementById('canvas-wrapper');
+        canvas.setWidth(wrapper.clientWidth);
+        canvas.setHeight(wrapper.clientHeight);
+
+        const ratio = Math.min(canvas.width / img.width, canvas.height / img.height);
+        
+        // Встановлюємо фон по центру
+        img.set({
+            originX: 'center',
+            originY: 'center',
+            left: canvas.width / 2,
+            top: canvas.height / 2,
+            selectable: false,
+            scaleX: ratio,
+            scaleY: ratio
         });
-    }, {crossOrigin:'anonymous'});
+
+        canvas.setBackgroundImage(img, () => {
+            canvas.getObjects().forEach(o => canvas.remove(o));
+            
+            const data = lineDataCache[id] || [];
+            
+            // Розраховуємо верхній лівий кут САМОГО фото на полотні
+            const offsetX = (canvas.width / 2) - (img.width * ratio / 2);
+            const offsetY = (canvas.height / 2) - (img.height * ratio / 2);
+
+            data.forEach(p => {
+                // Відновлюємо координати: (локальна точка * масштаб) + зміщення фону
+                createDimension(
+                    { x: (p.p1.x * ratio) + offsetX, y: (p.p1.y * ratio) + offsetY },
+                    { x: (p.p2.x * ratio) + offsetX, y: (p.p2.y * ratio) + offsetY },
+                    p.val
+                );
+            });
+            canvas.renderAll();
+        });
+    }, { crossOrigin: 'anonymous' });
 }
 
 // ---------------- START & AUTH ----------------
