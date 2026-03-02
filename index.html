@@ -67,7 +67,9 @@ const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let canvas=null, tokenClient=null, accessToken=localStorage.getItem('at');
 let rootId=null, currentFolderId=null, currentPhotoId=null;
-let isDrawingMode=false, firstPoint=null;
+let firstPoint=null;
+let isDrawingMode = false;
+let isTextMode = false; // Додаємо тільки цю нову змінну
 let photoCache={}, lineDataCache={};
 
 // --- СИСТЕМНІ ФУНКЦІЇ ---
@@ -469,19 +471,32 @@ async function fetchPhoto(id){
 }
 
 // ---------------- BUTTONS ----------------
-let isDrawingMode = false;
-let isTextMode = false; // Новий режим
+// Кнопка малювання
+document.getElementById('drawModeBtn').onclick = () => {
+    isDrawingMode = !isDrawingMode;
+    isTextMode = false; // Вимикаємо текст, якщо вмикаємо малювання
+    updateButtonStyles();
+};
 
+// Кнопка тексту
 document.getElementById('textModeBtn').onclick = () => {
     isTextMode = !isTextMode;
     isDrawingMode = false; // Вимикаємо малювання, якщо вмикаємо текст
-    
-    // Візуально підсвічуємо кнопку
-    document.getElementById('textModeBtn').style.background = isTextMode ? '#FF9500' : '#444';
-    document.getElementById('drawModeBtn').style.background = '#444';
-    
-    setStatus(isTextMode ? "✏️ Режим редагування тексту" : "👀 Режим перегляду");
+    updateButtonStyles();
 };
+
+// Допоміжна функція для стилів (щоб не дублювати код)
+function updateButtonStyles() {
+    const dBtn = document.getElementById('drawModeBtn');
+    const tBtn = document.getElementById('textModeBtn');
+    
+    dBtn.style.background = isDrawingMode ? '#FF9500' : '#444';
+    tBtn.style.background = isTextMode ? '#007AFF' : '#444'; // Тексту дамо синій колір для контрасту
+    
+    if (isDrawingMode) setStatus("➕ Режим: Малювання ліній");
+    else if (isTextMode) setStatus("✏️ Режим: Введення значень");
+    else setStatus("👀 Режим: Перегляд");
+}
 
 
     
