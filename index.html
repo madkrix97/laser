@@ -181,6 +181,38 @@ function updateDimension(o){
     canvas.renderAll();
 }
 
+async function downloadProjectData(folderId) {
+    setStatus("⏳ Завантаження даних з хмари...");
+    try {
+        // Шукаємо всі файли, що починаються на data_ в цій папці
+        const res = await gapi.client.drive.files.list({
+            q: `'${folderId}' in parents and name contains 'data_' and trashed=false`,
+            fields: 'files(id, name)'
+        });
+
+        if (res.result.files && res.result.files.length > 0) {
+            for (const file of res.result.files) {
+                // Отримуємо ID фото з назви файлу (data_ID.json)
+                const photoId = file.name.replace('data_', '').replace('.json', '');
+                
+                // Завантажуємо вміст файлу
+                const dataRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                });
+                const jsonData = await dataRes.json();
+                
+                // Записуємо в локальний кеш
+                lineDataCache[photoId] = jsonData;
+            }
+            localStorage.setItem('laser_offline_cache', JSON.stringify(lineDataCache));
+            setStatus("✅ Дані проекту імпортовано");
+        }
+    } catch (e) {
+        console.error("Помилка завантаження даних:", e);
+        setStatus("❌ Не вдалося підтягнути дані з Drive");
+    }
+}
+    
 function setMainImg(url, id, thumb){
     currentPhotoId=id;
     document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active'));
@@ -250,11 +282,15 @@ async function loadProjects(){
     const res=await gapi.client.drive.files.list({q:`'${rootId}' in parents and trashed=false`, orderBy:'name'});
     res.result.files.forEach(f=>{
         const div=document.createElement('div'); div.className='project-item'; div.innerText="📂 "+f.name;
-        div.onclick=()=>{ 
-            document.querySelectorAll('.project-item').forEach(i=>i.classList.remove('active'));
-            div.classList.add('active');
-            currentFolderId=f.id; loadPhotos(); 
-        };
+div.onclick = async () => { 
+    document.querySelectorAll('.project-item').forEach(i => i.classList.remove('active'));
+    div.classList.add('active');
+    currentFolderId = f.id; 
+    
+    // ВАЖЛИВО: Спочатку викачуємо дані, потім вантажимо фото
+    await downloadProjectData(f.id); 
+    loadPhotos(); 
+};
         list.appendChild(div);
     });
 }
