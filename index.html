@@ -160,28 +160,27 @@ function initCanvas(){
         backgroundColor: '#111'
     });
 
-    // ОБРОБНИК КЛІКУ
-    canvas.on('mouse:down', (opt) => {
-        // Якщо ми влучили в ТЕКСТ — міняємо розмір і ВИХОДИМО
+    // 1. РЕДАГУВАННЯ ЧЕРЕЗ ПОДВІЙНИЙ КЛІК (найнадійніше)
+    canvas.on('mouse:dblclick', (opt) => {
         if (opt.target && opt.target.type === 'text') {
             const v = prompt("Введіть розмір:", opt.target.text);
-            if (v !== null) {
+            if (v !== null && v.trim() !== "") {
                 opt.target.set('text', v);
                 canvas.renderAll();
                 saveToLocal();
             }
-            return; // Це не дає почати малювати лінію поверх тексту
         }
+    });
 
-        // Якщо влучили в ТОЧКУ — просто виходимо (даємо Fabric її рухати)
-        if (opt.target && opt.target.role === 'node') return;
+    // 2. МАЛЮВАННЯ (на одинарний клік)
+    canvas.on('mouse:down', (opt) => {
+        // Якщо натиснули на точку або текст — не малюємо нову лінію
+        if (opt.target) return;
 
-        // МАЛЮВАННЯ (працює, тільки якщо ми НЕ влучили в об'єкт)
         if (isDrawingMode) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
-                // Можна додати маленьку тимчасову точку, щоб бачити початок
             } else {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 saveToLocal();
@@ -214,14 +213,19 @@ function createDimension(p1, p2, val = "0.000") {
         selectable: false, evented: false
     });
 
-    const text = new fabric.Text(val, {
-        fontSize: 20, fill: 'white', backgroundColor: 'black',
-        originX: 'center', originY: 'center',
-        hasControls: false, 
-        selectable: true, // Потрібно для mouse:down
-        evented: true,
-        padding: 15
-    });
+const text = new fabric.Text(val, {
+    fontSize: 22,
+    fill: 'white',
+    backgroundColor: 'black',
+    originX: 'center',
+    originY: 'center',
+    hasControls: false,
+    selectable: true, // ВАЖЛИВО: має бути true для реєстрації dblclick
+    evented: true,
+    padding: 20,
+    lockMovementX: true,
+    lockMovementY: true
+});
 
     const owner = { n1, n2, line, text };
     n1.owner = n2.owner = text.owner = owner;
