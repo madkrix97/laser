@@ -158,34 +158,31 @@ function initCanvas(){
         width: wrapper.clientWidth, 
         height: wrapper.clientHeight, 
         selection: false, 
-        backgroundColor: '#111'
+        backgroundColor: '#111',
+        // Дозволяємо підйоми подій
+        fireMiddleClick: true,
+        stopContextMenu: true
     });
 
     canvas.on('mouse:down', (opt) => {
-        // 1. Перевіряємо, чи ми влучили саме в ТЕКСТ
+        // ЯКЩО НАТИСНУЛИ НА ТЕКСТ
         if (opt.target && opt.target.type === 'text') {
-            if (opt.e) opt.e.stopPropagation();
-            
             const v = prompt("Введіть розмір:", opt.target.text);
             if (v !== null && v.trim() !== "") {
                 opt.target.set('text', v);
                 canvas.renderAll();
                 saveToLocal();
             }
-            return; // Виходимо, щоб не почалося малювання
+            return; // ПРИПИНЯЄМО дію, щоб не почалося малювання
         }
 
-        // 2. Якщо влучили в ТОЧКУ (Circle), нічого не робимо (даємо Fabric.js її рухати)
-        if (opt.target && opt.target.role === 'node') {
-            return; 
-        }
-        
-        // 3. Логіка малювання нової лінії (тільки якщо натиснули на порожнє місце)
+        // ЛОГІКА МАЛЮВАННЯ (тільки якщо активний режим і натиснули НЕ на об'єкт)
         if (isDrawingMode && !opt.target) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
             } else {
+                // Створюємо розмір
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 saveToLocal();
                 firstPoint = null;
@@ -193,71 +190,59 @@ function initCanvas(){
         }
     });
 
-    // Оновлення ліній при перетягуванні точок
     canvas.on('object:moving', (e) => { 
         if(e.target.owner) updateDimension(e.target.owner); 
     });
 
     canvas.on('object:modified', saveToLocal);
 }
-function createDimension(p1, p2, val = "0.000") {
-    const props = {
-        radius: 12,
-        fill: 'rgba(255,149,0,0.8)',
-        originX: 'center',
-        originY: 'center',
-        hasControls: false,
-        hasBorders: false,
-        role: 'node',
-        evented: true // МАЄ БУТИ TRUE
-    };
 
-    const n1 = new fabric.Circle({ ...props, left: p1.x, top: p1.y });
-    const n2 = new fabric.Circle({ ...props, left: p2.x, top: p2.y });
+
+function initCanvas(){
+    const wrapper = document.getElementById('canvas-wrapper');
+    if(canvas) canvas.dispose();
     
-    const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
-        stroke: '#FF9500',
-        strokeWidth: 3,
-        selectable: false,
-        evented: false 
+    canvas = new fabric.Canvas('c', {
+        width: wrapper.clientWidth, 
+        height: wrapper.clientHeight, 
+        selection: false, 
+        backgroundColor: '#111',
+        // Дозволяємо підйоми подій
+        fireMiddleClick: true,
+        stopContextMenu: true
     });
 
-const text = new fabric.Text(val, {
-    fontSize: 22,
-    fill: 'white',
-    backgroundColor: 'black',
-    originX: 'center',
-    originY: 'center',
-    hasControls: false,
-    selectable: true,      // Дозволяємо вибір для кліку
-    evented: true,
-    lockMovementX: true,   // Забороняємо совати вбік
-    lockMovementY: true,   // Забороняємо совати вгору/вниз
-    padding: 20
-});
+    canvas.on('mouse:down', (opt) => {
+        // ЯКЩО НАТИСНУЛИ НА ТЕКСТ
+        if (opt.target && opt.target.type === 'text') {
+            const v = prompt("Введіть розмір:", opt.target.text);
+            if (v !== null && v.trim() !== "") {
+                opt.target.set('text', v);
+                canvas.renderAll();
+                saveToLocal();
+            }
+            return; // ПРИПИНЯЄМО дію, щоб не почалося малювання
+        }
 
-    const owner = { n1, n2, line, text };
-    n1.owner = n2.owner = text.owner = owner;
-
-    // Оновлений обробник
-    text.on('mousedown', (opt) => {
-        console.log("Клік по тексту зафіксовано!"); // Перевірка в консолі
-        
-        const v = prompt("Введіть розмір:", text.text);
-        if (v !== null && v.trim() !== "") {
-            text.set('text', v);
-            canvas.renderAll();
-            saveToLocal();
+        // ЛОГІКА МАЛЮВАННЯ (тільки якщо активний режим і натиснули НЕ на об'єкт)
+        if (isDrawingMode && !opt.target) {
+            const pointer = canvas.getPointer(opt.e);
+            if (!firstPoint) {
+                firstPoint = { x: pointer.x, y: pointer.y };
+            } else {
+                // Створюємо розмір
+                createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
+                saveToLocal();
+                firstPoint = null;
+            }
         }
     });
 
-    canvas.add(line, text, n1, n2);
-    
-    // ПРИМУСОВО виводимо текст на передній план
-    text.bringToFront(); 
-    canvas.renderAll();
-    
-    updateDimension(owner);
+    canvas.on('object:moving', (e) => { 
+        if(e.target.owner) updateDimension(e.target.owner); 
+    });
+
+    canvas.on('object:modified', saveToLocal);
 }
 
 function updateDimension(o){
