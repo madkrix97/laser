@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LaserApp Pro - Local Sync</title>
+<title>LaserApp Pro - Fixed Coordinates</title>
 <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
 <style>
 :root {
@@ -21,8 +21,7 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 #photo-strip {height:110px;background:var(--bg);border-top:1px solid #333;display:flex;gap:12px;padding:10px;overflow-x:auto;align-items:center;}
 .thumb {height:85px;width:85px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;flex-shrink:0;}
 .thumb.active {border-color:var(--blue);}
-.btn {padding:10px;border-radius:8px;border:none;color:white;font-weight:bold;cursor:pointer;font-size:12px;text-align:center;transition: 0.2s;}
-.btn:active {opacity: 0.7;}
+.btn {padding:10px;border-radius:8px;border:none;color:white;font-weight:bold;cursor:pointer;font-size:12px;text-align:center;}
 .btn-orange {background:var(--orange);}
 .btn-blue {background:var(--blue);}
 .btn-red {background:var(--red);}
@@ -36,16 +35,15 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 <body>
 <div id="sidebar">
     <div class="sidebar-header">
-        <div id="net-status"><span class="dot"></span><span class="text">Перевірка...</span></div>
+        <div id="net-status"><span class="dot"></span><span class="text">Очікування...</span></div>
         <button id="authBtn" class="btn btn-dark">🔑 Авторизація Drive</button>
         <button id="newProjectBtn" class="btn btn-dark">➕ Новий Об'єкт</button>
-        
         <div style="display:flex;gap:5px;">
             <button id="drawModeBtn" class="btn btn-orange" style="flex:2;">➕ РОЗМІР</button>
             <button id="delObjBtn" class="btn btn-red" style="flex:1;">🗑️</button>
         </div>
-        <button id="syncBtn" class="btn btn-blue">☁️ СИНХРОНІЗУВАТИ ПРОЕКТ</button>
-        <button id="exportBtn" class="btn btn-green">📥 ЕКСПОРТ JPG</button>
+        <button id="syncBtn" class="btn btn-blue">☁️ СИНХРОНІЗУВАТИ</button>
+        <button id="clearCacheBtn" class="btn btn-dark" style="font-size:10px;">♻️ ОЧИСТИТИ ЛОКАЛЬНУ ПАМ'ЯТЬ</button>
     </div>
     <div id="project-list"></div>
     <div id="status-bar">Система готова</div>
@@ -84,22 +82,20 @@ function updateNetStatus(state){
     else { dot.style.background = "#FF453A"; text.textContent = "OFFLINE"; }
 }
 
-// ---------------- ЛОКАЛЬНА РОБОТА (КЕШ) ----------------
+// ---------------- ЛОКАЛЬНА РОБОТА ----------------
 
 function saveToLocal() {
     if (!currentPhotoId || !canvas || !canvas.backgroundImage) return;
-    
     const img = canvas.backgroundImage;
     const scale = img.scaleX;
 
-    // Рахуємо реальний лівий верхній кут картинки на канвасі
+    // Точний розрахунок відступів фону для координат
     const offsetX = (canvas.width / 2) - (img.width * scale / 2);
     const offsetY = (canvas.height / 2) - (img.height * scale / 2);
 
     const data = canvas.getObjects().filter(o => o.role === 'node' && o.owner).map(node => {
         if (node === node.owner.n1) {
             return {
-                // Віднімаємо зміщення, щоб отримати 0,0 у кутку ФОТО
                 p1: { x: (node.owner.n1.left - offsetX) / scale, y: (node.owner.n1.top - offsetY) / scale },
                 p2: { x: (node.owner.n2.left - offsetX) / scale, y: (node.owner.n2.top - offsetY) / scale },
                 val: node.owner.text.text
@@ -110,20 +106,20 @@ function saveToLocal() {
 
     lineDataCache[currentPhotoId] = data;
     localStorage.setItem('laser_offline_cache', JSON.stringify(lineDataCache));
-    setStatus("💾 Координати зафіксовано відносно фото");
+    setStatus("💾 Збережено локально");
 }
 
-// ---------------- РОБОТА З DRIVE (СИНХРОНІЗАЦІЯ) ----------------
+// ---------------- DRIVE SYNC ----------------
 
 async function syncAll() {
-    if (!currentFolderId || !navigator.onLine) { alert("Помилка: проект не обрано або немає мережі"); return; }
+    if (!currentFolderId || !navigator.onLine) { alert("Немає зв'язку або не обрано проект!"); return; }
     updateNetStatus("sync");
-    setStatus("☁️ Синхронізація з Drive...");
+    setStatus("☁️ Синхронізація...");
 
     try {
-        // Проходимо по всіх фото поточного проекту, що є в кеші
         for (const photoId in lineDataCache) {
             const data = lineDataCache[photoId];
+            if(!data || data.length === 0) continue;
             const fileName = `data_${photoId}.json`;
             const content = JSON.stringify(data);
 
@@ -145,42 +141,20 @@ async function syncAll() {
                 });
             }
         }
-        setStatus("✅ Синхронізацію завершено!");
+        setStatus("✅ Синхронізовано!");
         updateNetStatus("online");
-    } catch (e) {
-        console.error(e);
-        setStatus("❌ Помилка синхронізації");
-        updateNetStatus("online");
-    }
+    } catch (e) { setStatus("❌ Помилка Sync"); updateNetStatus("online"); }
 }
 
-async function downloadDataFromServer(folderId) {
-    setStatus("⏳ Завантаження даних...");
-    try {
-        const res = await gapi.client.drive.files.list({
-            q: `'${folderId}' in parents and name contains 'data_' and trashed=false`
-        });
-        
-        for (const file of res.result.files) {
-            const photoId = file.name.replace('data_', '').replace('.json', '');
-            const dataRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
-                headers: { 'Authorization': 'Bearer ' + accessToken }
-            });
-            lineDataCache[photoId] = await dataRes.json();
-        }
-        localStorage.setItem('laser_offline_cache', JSON.stringify(lineDataCache));
-        setStatus("✅ Дані проекту оновлено");
-    } catch (e) { console.warn("Даних на сервері ще немає"); }
-}
-
-// ---------------- CANVAS & UI ----------------
+// ---------------- CANVAS LOGIC ----------------
 
 function initCanvas(){
     const wrapper=document.getElementById('canvas-wrapper');
+    if(canvas) canvas.dispose();
     canvas=new fabric.Canvas('c',{width:wrapper.clientWidth, height:wrapper.clientHeight, selection:false, backgroundColor:'#111'});
+    
+    canvas.on('object:moving', (e) => { if(e.target.owner) updateDimension(e.target.owner); });
     canvas.on('object:modified', saveToLocal);
-    canvas.on('object:moving', (e) => { if(e.target.owner) { updateDimension(e.target.owner); } });
-    canvas.on('object:moved', saveToLocal);
 }
 
 function createDimension(p1, p2, val="0.000"){
@@ -188,12 +162,12 @@ function createDimension(p1, p2, val="0.000"){
     const n1=new fabric.Circle({...props, left:p1.x, top:p1.y});
     const n2=new fabric.Circle({...props, left:p2.x, top:p2.y});
     const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y], {stroke:'#FF9500', strokeWidth:3, selectable:false, evented:false});
-    const text=new fabric.Text(val, {fontSize:20, fill:'white', backgroundColor:'black', originX:'center', originY:'center', hasControls:false});
+    const text=new fabric.Text(val, {fontSize:18, fill:'white', backgroundColor:'black', originX:'center', originY:'center', hasControls:false});
     const owner={n1,n2,line,text};
     n1.owner=n2.owner=text.owner=owner;
     
     text.on('mousedown', () => {
-        const v = prompt("Введіть розмір:", text.text);
+        const v = prompt("Розмір:", text.text);
         if(v) { text.set('text', v); canvas.renderAll(); saveToLocal(); }
     });
 
@@ -207,21 +181,80 @@ function updateDimension(o){
     canvas.renderAll();
 }
 
-// ---------------- ЗАВАНТАЖЕННЯ ПРОЕКТІВ ----------------
+function setMainImg(url, id, thumb){
+    currentPhotoId=id;
+    document.querySelectorAll('.thumb').forEach(t=>t.classList.remove('active'));
+    thumb.classList.add('active');
+
+    fabric.Image.fromURL(url, (img)=>{
+        const wrapper=document.getElementById('canvas-wrapper');
+        canvas.setWidth(wrapper.clientWidth); canvas.setHeight(wrapper.clientHeight);
+        const ratio=Math.min(canvas.width/img.width, canvas.height/img.height);
+        
+        img.set({ originX:'center', originY:'center', left:canvas.width/2, top:canvas.height/2, selectable:false, scaleX:ratio, scaleY:ratio });
+        
+        canvas.setBackgroundImage(img, ()=>{ 
+            canvas.getObjects().forEach(o=>canvas.remove(o));
+            const data = lineDataCache[id] || [];
+            
+            // Розрахунок зміщення фону для коректного відображення точок
+            const offsetX = (canvas.width / 2) - (img.width * ratio / 2);
+            const offsetY = (canvas.height / 2) - (img.height * ratio / 2);
+
+            data.forEach(p => {
+                createDimension(
+                    {x: (p.p1.x * ratio) + offsetX, y: (p.p1.y * ratio) + offsetY},
+                    {x: (p.p2.x * ratio) + offsetX, y: (p.p2.y * ratio) + offsetY},
+                    p.val
+                );
+            });
+            canvas.renderAll(); 
+        });
+    }, {crossOrigin:'anonymous'});
+}
+
+// ---------------- AUTH & START ----------------
+
+async function startApp(){
+    if(!gapi.client) { 
+        console.warn("GAPI не готовий, чекаємо..."); 
+        setTimeout(startApp, 500); 
+        return; 
+    }
+    gapi.client.setToken({access_token:accessToken});
+    updateNetStatus("online");
+    initCanvas();
+    
+    try {
+        const res=await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
+        rootId=res.result.files.length?res.result.files[0].id:(await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
+        loadProjects();
+    } catch(e) { setStatus("❌ Помилка авторизації"); }
+}
+
+function gapiLoaded(){ 
+    gapi.load('client', async () => {
+        await gapi.client.init({apiKey:API_KEY, discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]});
+        if(accessToken) startApp();
+    });
+}
+function gisLoaded(){
+    tokenClient=google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPES, callback: (res)=>{ accessToken=res.access_token; localStorage.setItem('at',accessToken); startApp(); }});
+    if(accessToken && gapi.client) startApp();
+}
+
+// ---------------- PROJECTS ----------------
 
 async function loadProjects(){
     const list=document.getElementById('project-list'); list.innerHTML="";
-    if(!accessToken) return;
     const res=await gapi.client.drive.files.list({q:`'${rootId}' in parents and trashed=false`, orderBy:'name'});
     res.result.files.forEach(f=>{
         const div=document.createElement('div'); div.className='project-item'; div.innerText="📂 "+f.name;
-        div.onclick=async ()=>{
+        div.onclick=()=>{ 
             document.querySelectorAll('.project-item').forEach(i=>i.classList.remove('active'));
             div.classList.add('active');
-            currentFolderId=f.id;
-            await downloadDataFromServer(f.id); // Підтягуємо JSON при вході в папку
-            loadPhotos();
-        }
+            currentFolderId=f.id; loadPhotos(); 
+        };
         list.appendChild(div);
     });
 }
@@ -246,76 +279,12 @@ async function fetchPhoto(id){
     photoCache[id]=url; return url;
 }
 
-function setMainImg(url, id, thumb) {
-    currentPhotoId = id;
-    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
-    thumb.classList.add('active');
-
-    fabric.Image.fromURL(url, (img) => {
-        const wrapper = document.getElementById('canvas-wrapper');
-        canvas.setWidth(wrapper.clientWidth);
-        canvas.setHeight(wrapper.clientHeight);
-
-        const ratio = Math.min(canvas.width / img.width, canvas.height / img.height);
-        
-        // Встановлюємо фон по центру
-        img.set({
-            originX: 'center',
-            originY: 'center',
-            left: canvas.width / 2,
-            top: canvas.height / 2,
-            selectable: false,
-            scaleX: ratio,
-            scaleY: ratio
-        });
-
-        canvas.setBackgroundImage(img, () => {
-            canvas.getObjects().forEach(o => canvas.remove(o));
-            
-            const data = lineDataCache[id] || [];
-            
-            // Розраховуємо верхній лівий кут САМОГО фото на полотні
-            const offsetX = (canvas.width / 2) - (img.width * ratio / 2);
-            const offsetY = (canvas.height / 2) - (img.height * ratio / 2);
-
-            data.forEach(p => {
-                // Відновлюємо координати: (локальна точка * масштаб) + зміщення фону
-                createDimension(
-                    { x: (p.p1.x * ratio) + offsetX, y: (p.p1.y * ratio) + offsetY },
-                    { x: (p.p2.x * ratio) + offsetX, y: (p.p2.y * ratio) + offsetY },
-                    p.val
-                );
-            });
-            canvas.renderAll();
-        });
-    }, { crossOrigin: 'anonymous' });
-}
-
-// ---------------- START & AUTH ----------------
-
-async function startApp(){
-    gapi.client.setToken({access_token:accessToken});
-    updateNetStatus("online");
-    initCanvas();
-    const res=await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
-    rootId=res.result.files.length?res.result.files[0].id:(await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
-    loadProjects();
-}
-
-function gapiLoaded(){ gapi.load('client', ()=>gapi.client.init({apiKey:API_KEY, discoveryDocs:["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]})); }
-function gisLoaded(){
-    tokenClient=google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPES, callback: (res)=>{ accessToken=res.access_token; localStorage.setItem('at',accessToken); startApp(); }});
-    if(accessToken) startApp();
-}
-
 // ---------------- BUTTONS ----------------
 
 document.getElementById('authBtn').onclick=()=>tokenClient?.requestAccessToken();
 document.getElementById('syncBtn').onclick=syncAll;
-document.getElementById('newProjectBtn').onclick=async ()=>{
-    const name=prompt("Назва проекту:");
-    if(name) { await gapi.client.drive.files.create({resource:{name:name, mimeType:'application/vnd.google-apps.folder', parents:[rootId]}}); loadProjects(); }
-};
+document.getElementById('clearCacheBtn').onclick=()=>{ if(confirm("Очистити локальні дані?")){ localStorage.removeItem('laser_offline_cache'); lineDataCache={}; location.reload(); }};
+
 document.getElementById('drawModeBtn').onclick=function(){
     isDrawingMode=!isDrawingMode; this.style.background=isDrawingMode? "var(--green)":"var(--orange)";
     if(isDrawingMode){
@@ -327,16 +296,16 @@ document.getElementById('drawModeBtn').onclick=function(){
         });
     } else { canvas.off('mouse:down'); firstPoint=null; }
 };
+
 document.getElementById('delObjBtn').onclick=()=>{
     const act=canvas.getActiveObject();
-    if(act && act.owner) { canvas.remove(act.owner.n1, act.owner.n2, act.owner.line, act.owner.text); canvas.discardActiveObject().renderAll(); saveToLocal(); }
+    if(act && act.owner) { canvas.remove(act.owner.n1, act.owner.n2, act.owner.line, act.owner.text); saveToLocal(); }
 };
 
 window.onload=()=>{
     const s1=document.createElement('script'); s1.src="https://apis.google.com/js/api.js"; s1.onload=gapiLoaded; document.body.appendChild(s1);
     const s2=document.createElement('script'); s2.src="https://accounts.google.com/gsi/client"; s2.onload=gisLoaded; document.body.appendChild(s2);
     const saved = localStorage.getItem('laser_offline_cache'); if(saved) lineDataCache=JSON.parse(saved);
-    updateNetStatus(navigator.onLine ? "online" : "offline");
 };
 </script>
 </body>
