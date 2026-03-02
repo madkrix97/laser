@@ -2,80 +2,76 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Dashboard</title>
+    <title>Google Drive Authentication and Photo Gallery</title>
+    <script src="https://apis.google.com/js/api.js"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-        }
-        #auth {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-        }
-        #project-list {
-            position: absolute;
-            top: 50px;
-            left: 10px;
-            width: 200px;
-            height: calc(100% - 50px);
-            overflow-y: auto;
-            border: 1px solid #ccc;
-            background: #f9f9f9;
-        }
-        #photo-viewer {
-            position: absolute;
-            top: 50px;
-            left: 230px;
-            width: calc(100% - 240px);
-            height: calc(100% - 50px);
-            border: 1px solid #ccc;
-            background: #fff;
-        }
+        body { font-family: Arial, sans-serif; }
+        #gallery { position: relative; width: 100%; height: 400px; }
+        .photo { position: absolute; width: 100%; height: 100%; }
     </style>
 </head>
 <body>
-    <div id="auth">
-        <h3>Authentication</h3>
-        <input type="text" id="username" placeholder="Username">
-        <input type="password" id="password" placeholder="Password">
-        <button id="login">Login</button>
-    </div>
-    <div id="project-list">
-        <h3>Project List</h3>
-        <ul id="projects"></ul>
-    </div>
-    <div id="photo-viewer">
-        <h3>Photo Viewer</h3>
-        <img id="photo" src="" alt="Photo" style="max-width: 100%; max-height: 100%;">
-    </div>
+    <h1>Google Drive Photo Gallery</h1>
+    <div id="gallery"></div>
+    <button id="next-button">Next Photo</button>
+    <button id="prev-button">Previous Photo</button>
+    
     <script>
-        // Placeholder for project loading
-        document.getElementById('login').addEventListener('click', function() {
-            // Add authentication logic here
-            console.log('Logged in:', document.getElementById('username').value);
+        const CLIENT_ID = 'YOUR_CLIENT_ID';
+        const API_KEY = 'YOUR_API_KEY';
+        const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+        let photos = [];
+        let currentIndex = 0;
+
+        function handleClientLoad() {
+            gapi.load('client:auth2', initClient);
+        }
+
+        async function initClient() {
+            await gapi.client.init({
+                apiKey: API_KEY,
+                clientId: CLIENT_ID,
+                scope: SCOPES,
+                discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+            });
+            listFiles();
+        }
+
+        async function listFiles() {
+            const response = await gapi.client.drive.files.list({
+                q: "mimeType='image/jpeg'",
+                fields: 'files(id, name, webContentLink)'
+            });
+            photos = response.result.files;
+            if (photos.length > 0) {
+                loadPhoto(currentIndex);
+            }
+        }
+
+        function loadPhoto(index) {
+            const photo = photos[index];
+            const img = document.createElement('img');
+            img.src = photo.webContentLink;
+            img.className = 'photo';
+            img.style.display = 'block';
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = ''; // Clear previous photo
+            gallery.appendChild(img);
+        }
+
+        document.getElementById('next-button').addEventListener('click', () => {
+            currentIndex = (currentIndex + 1) % photos.length;
+            loadPhoto(currentIndex);
         });
 
-        // Placeholder for loading projects
-        const projects = ['Project 1', 'Project 2', 'Project 3']; // Example projects
-        const projectsList = document.getElementById('projects');
-        projects.forEach(project => {
-            const li = document.createElement('li');
-            li.textContent = project;
-            projectsList.appendChild(li);
+        document.getElementById('prev-button').addEventListener('click', () => {
+            currentIndex = (currentIndex - 1 + photos.length) % photos.length;
+            loadPhoto(currentIndex);
         });
 
-        // Placeholder for loading and switching photos
-        const photos = ['photo1.jpg', 'photo2.jpg', 'photo3.jpg']; // Example photos
-        let currentPhotoIndex = 0;
-        document.getElementById('photo').src = photos[currentPhotoIndex];
-        document.getElementById('projects').addEventListener('click', function() {
-            currentPhotoIndex = (currentPhotoIndex + 1) % photos.length;
-            document.getElementById('photo').src = photos[currentPhotoIndex];
-        });
+        handleClientLoad();
     </script>
 </body>
 </html>
