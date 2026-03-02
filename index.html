@@ -92,9 +92,14 @@ tokenClient=google.accounts.oauth2.initTokenClient({
 client_id:CLIENT_ID,
 scope:SCOPES,
 callback:(resp)=>{
-accessToken=resp.access_token;
-setStatus("Authorized");
-initGapi();
+    accessToken = resp.access_token;
+
+    gapi.client.setToken({
+        access_token: resp.access_token
+    });
+
+    setStatus("Authorized");
+    initGapi();
 }
 });
 tokenClient.requestAccessToken();
@@ -331,3 +336,4 @@ opt.e.stopPropagation();
 </script>
 </body>
 </html>
+
