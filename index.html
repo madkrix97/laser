@@ -44,6 +44,7 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
         </div>
         <button id="syncBtn" class="btn btn-blue">☁️ СИНХРОНІЗУВАТИ</button>
         <button id="clearCacheBtn" class="btn btn-dark" style="font-size:10px;">♻️ ОЧИСТИТИ ЛОКАЛЬНУ ПАМ'ЯТЬ</button>
+        <button id="exportBtn" class="btn btn-green">📥 ЗАВАНТАЖИТИ JPG</button>
     </div>
     <div id="project-list"></div>
     <div id="status-bar">Система готова</div>
@@ -245,6 +246,34 @@ function setMainImg(url, id, thumb){
     }, {crossOrigin:'anonymous'});
 }
 
+
+function exportCurrentPhoto() {
+    if (!canvas || !currentPhotoId) {
+        alert("Спочатку відкрийте фото!");
+        return;
+    }
+    
+    setStatus("🚀 Формування зображення...");
+
+    // Створюємо "знімок" канвасу
+    const dataURL = canvas.toDataURL({
+        format: 'jpeg',
+        quality: 0.9,
+        multiplier: 1.5 // Робимо картинку чіткішою (1.5x від екранного розміру)
+    });
+
+    // Створюємо невидиме посилання для завантаження
+    const link = document.createElement('a');
+    link.download = `laser_export_${currentPhotoId}.jpg`;
+    link.href = dataURL;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setStatus("✅ Фото збережено!");
+}
+
+    
 // ---------------- AUTH & START ----------------
 
 async function startApp(){
@@ -317,6 +346,8 @@ async function fetchPhoto(id){
 
 // ---------------- BUTTONS ----------------
 
+document.getElementById('exportBtn').onclick = exportCurrentPhoto;
+    
 document.getElementById('authBtn').onclick=()=>tokenClient?.requestAccessToken();
 document.getElementById('syncBtn').onclick=syncAll;
 document.getElementById('clearCacheBtn').onclick=()=>{ if(confirm("Очистити локальні дані?")){ localStorage.removeItem('laser_offline_cache'); lineDataCache={}; location.reload(); }};
