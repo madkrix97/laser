@@ -403,7 +403,60 @@ document.getElementById('newProjectBtn').onclick = async () => {
     }
 };
 
+// Коли ти обрав файли у вікні вибору:
+document.getElementById('fileInp').onchange = async (e) => {
+    const files = e.target.files;
+    
+    // Перевірка: чи вибрано проект і чи є інтернет
+    if (!currentFolderId) {
+        alert("Спочатку оберіть або створіть проект (папку)!");
+        return;
+    }
+    if (!accessToken) {
+        alert("Потрібна авторизація в Google Drive!");
+        return;
+    }
 
+    setStatus(`⏳ Завантаження ${files.length} фото...`);
+
+    for (let file of files) {
+        try {
+            // 1. Готуємо "паспорт" файлу (метадані)
+            const metadata = {
+                name: file.name,
+                mimeType: file.type,
+                parents: [currentFolderId] // Кладемо саме в папку поточного проекту
+            };
+
+            // 2. Формуємо запит для Google Drive
+            const formData = new FormData();
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            formData.append('file', file);
+
+            // 3. Відправляємо на сервер
+            const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + accessToken },
+                body: formData
+            });
+
+            if (!response.ok) throw new Error("Помилка завантаження");
+
+            console.log(`Файл ${file.name} успішно завантажено`);
+
+        } catch (err) {
+            console.error("Помилка:", err);
+            setStatus(`❌ Не вдалося завантажити ${file.name}`);
+        }
+    }
+
+    setStatus("✅ Завантаження завершено!");
+    
+    // 4. Оновлюємо стрічку з прев'ю, щоб нові фото з'явилися внизу
+    loadPhotos(); 
+};
+
+    
     
 
 window.onload=()=>{
