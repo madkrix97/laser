@@ -369,6 +369,43 @@ document.getElementById('delObjBtn').onclick=()=>{
     if(act && act.owner) { canvas.remove(act.owner.n1, act.owner.n2, act.owner.line, act.owner.text); saveToLocal(); }
 };
 
+document.getElementById('newProjectBtn').onclick = async () => {
+    // 1. Перевірка авторизації
+    if (!accessToken || !rootId) {
+        alert("Будь ласка, спочатку пройдіть авторизацію (кнопка Drive Login)");
+        return;
+    }
+
+    const name = prompt("Введіть назву нового об'єкта (проекту):");
+    if (!name) return;
+
+    setStatus("⏳ Створення папки...");
+
+    try {
+        // 2. Створення папки на Drive
+        const response = await gapi.client.drive.files.create({
+            resource: {
+                name: name,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [rootId]
+            }
+        });
+
+        if (response.status === 200) {
+            setStatus("✅ Об'єкт створено!");
+            // 3. Оновлюємо список проектів, щоб побачити новий
+            await loadProjects();
+        }
+    } catch (err) {
+        console.error("Помилка створення проекту:", err);
+        alert("Не вдалося створити папку. Перевірте з'єднання.");
+        setStatus("❌ Помилка");
+    }
+};
+
+
+    
+
 window.onload=()=>{
     const s1=document.createElement('script'); s1.src="https://apis.google.com/js/api.js"; s1.onload=gapiLoaded; document.body.appendChild(s1);
     const s2=document.createElement('script'); s2.src="https://accounts.google.com/gsi/client"; s2.onload=gisLoaded; document.body.appendChild(s2);
