@@ -2,272 +2,332 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
-<title>Laser Measure PRO</title>
+<title>LaserApp PRO</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
 <script src="https://apis.google.com/js/api.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
 <style>
-body { margin:0; font-family:Arial; background:#111; color:#fff; }
-#toolbar { padding:10px; background:#1e1e1e; display:flex; gap:10px; align-items:center; }
-button { padding:6px 12px; cursor:pointer; }
-canvas { border:1px solid #444; }
-#status { margin-left:auto; font-size:14px; }
+body{margin:0;font-family:Arial;background:#111;color:#fff;}
+#topbar{background:#1e1e1e;padding:8px;display:flex;gap:10px;align-items:center;}
+button,input{padding:6px}
+#sidebar{
+position:fixed;left:0;top:40px;bottom:0;width:220px;
+background:#181818;overflow:auto;padding:10px;border-right:1px solid #333;
+}
+#main{
+margin-left:230px;margin-top:40px;
+}
+#projectList div,#photoList div{
+padding:4px;cursor:pointer;border-bottom:1px solid #333;
+}
+#projectList div:hover,#photoList div:hover{background:#333}
+canvas{border:1px solid #333}
 </style>
 </head>
 <body>
 
-<div id="toolbar">
-<input type="file" id="photoInput" accept="image/*">
-<button onclick="syncToDrive()">💾 Sync</button>
-<span id="status">Not authorized</span>
+<div id="topbar">
+<button onclick="createProject()">➕ Новий проект</button>
+<input type="file" id="photoUpload" accept="image/*">
+<button onclick="sync()">💾 Sync</button>
+<span id="status">Loading...</span>
 </div>
 
+<div id="sidebar">
+<h3>Проекти</h3>
+<div id="projectList"></div>
+<hr>
+<h3>Фото</h3>
+<div id="photoList"></div>
+</div>
+
+<div id="main">
 <canvas id="c"></canvas>
+</div>
 
 <script>
-const CLIENT_ID = "300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com";
-const API_KEY = "AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo";
-const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
-const SCOPES = "https://www.googleapis.com/auth/drive.file";
+// ---------------- CONFIG ----------------
+const CLIENT_ID="300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com";
+const API_KEY="AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo";
+const SCOPES="https://www.googleapis.com/auth/drive.file";
+const DISCOVERY="https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
 
-let canvas = new fabric.Canvas('c',{selection:false});
-canvas.setWidth(window.innerWidth);
-canvas.setHeight(window.innerHeight-60);
+// ---------------- STATE ----------------
+let canvas=new fabric.Canvas("c",{selection:false});
+canvas.setWidth(window.innerWidth-240);
+canvas.setHeight(window.innerHeight-50);
 
-const AppState = {
-    currentPhotoName:null,
-    fileId:null,
-    lines:[],
-    isDirty:false
+const App={
+rootId:null,
+currentProjectId:null,
+currentProjectName:null,
+currentImageId:null,
+currentImageName:null,
+jsonFileId:null,
+lines:[],
+isDirty:false
 };
 
 let tokenClient;
 let accessToken=null;
 
-function setStatus(t){ document.getElementById("status").innerText=t; }
+function setStatus(t){document.getElementById("status").innerText=t;}
 
 // ---------------- AUTH ----------------
-
 function initGapi(){
-    gapi.load("client", async ()=>{
-        await gapi.client.init({
-            apiKey: API_KEY,
-            discoveryDocs:[DISCOVERY_DOC],
-        });
-    });
+gapi.load("client",async()=>{
+await gapi.client.init({
+apiKey:API_KEY,
+discoveryDocs:[DISCOVERY]
+});
+await ensureRootFolder();
+await loadProjects();
+});
 }
 
 function initGIS(){
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        callback:(tokenResponse)=>{
-            accessToken=tokenResponse.access_token;
-            setStatus("Authorized");
-        }
-    });
+tokenClient=google.accounts.oauth2.initTokenClient({
+client_id:CLIENT_ID,
+scope:SCOPES,
+callback:(resp)=>{
+accessToken=resp.access_token;
+setStatus("Authorized");
+initGapi();
+}
+});
+tokenClient.requestAccessToken();
 }
 
-function authorize(){
-    tokenClient.requestAccessToken();
+window.onload=initGIS;
+
+// ---------------- DRIVE ENGINE ----------------
+async function ensureRootFolder(){
+const res=await gapi.client.drive.files.list({
+q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+fields:"files(id,name)"
+});
+if(res.result.files.length){
+App.rootId=res.result.files[0].id;
+}else{
+const create=await gapi.client.drive.files.create({
+resource:{name:"LaserApp",mimeType:"application/vnd.google-apps.folder"},
+fields:"id"
+});
+App.rootId=create.result.id;
+}
 }
 
-window.onload=()=>{
-    initGapi();
-    initGIS();
-    authorize();
-};
+async function loadProjects(){
+const res=await gapi.client.drive.files.list({
+q:`'${App.rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+fields:"files(id,name)"
+});
+const list=document.getElementById("projectList");
+list.innerHTML="";
+res.result.files.forEach(f=>{
+let div=document.createElement("div");
+div.innerText=f.name;
+div.onclick=()=>openProject(f.id,f.name);
+list.appendChild(div);
+});
+}
+
+async function createProject(){
+let name=prompt("Назва проекту:");
+if(!name)return;
+await gapi.client.drive.files.create({
+resource:{
+name:name,
+mimeType:"application/vnd.google-apps.folder",
+parents:[App.rootId]
+}
+});
+loadProjects();
+}
+
+async function openProject(id,name){
+App.currentProjectId=id;
+App.currentProjectName=name;
+loadPhotos();
+}
+
+async function loadPhotos(){
+const res=await gapi.client.drive.files.list({
+q:`'${App.currentProjectId}' in parents and mimeType contains 'image/' and trashed=false`,
+fields:"files(id,name)"
+});
+const list=document.getElementById("photoList");
+list.innerHTML="";
+res.result.files.forEach(f=>{
+let div=document.createElement("div");
+div.innerText=f.name;
+div.onclick=()=>openPhoto(f.id,f.name);
+list.appendChild(div);
+});
+}
 
 // ---------------- PHOTO LOAD ----------------
+async function openPhoto(id,name){
+App.currentImageId=id;
+App.currentImageName=name;
+App.lines=[];
+App.jsonFileId=null;
+App.isDirty=false;
 
-document.getElementById("photoInput").addEventListener("change", function(e){
-
-    const reader = new FileReader();
-    const file = e.target.files[0];
-    if(!file) return;
-
-    AppState.currentPhotoName=file.name;
-    AppState.lines=[];
-    AppState.fileId=null;
-
-    reader.onload=function(f){
-        fabric.Image.fromURL(f.target.result,img=>{
-            canvas.clear();
-            canvas.setBackgroundImage(img,canvas.renderAll.bind(canvas),{
-                originX:'center',
-                originY:'center',
-                left:canvas.width/2,
-                top:canvas.height/2,
-                scaleX: canvas.width/img.width,
-                scaleY: canvas.height/img.height
-            });
-            loadFromDrive();
-        });
-    };
-    reader.readAsDataURL(file);
+const file=await gapi.client.drive.files.get({
+fileId:id,
+alt:"media"
 });
 
-// ---------------- DIMENSION TOOL ----------------
+let blob=new Blob([file.body]);
+let url=URL.createObjectURL(blob);
 
-let tempPoints=[];
+fabric.Image.fromURL(url,img=>{
+canvas.clear();
+canvas.setBackgroundImage(img,canvas.renderAll.bind(canvas),{
+originX:'center',
+originY:'center',
+left:canvas.width/2,
+top:canvas.height/2,
+scaleX:canvas.width/img.width,
+scaleY:canvas.height/img.height
+});
+loadJson();
+});
+}
 
-canvas.on("mouse:down", function(opt){
-    const p = canvas.getPointer(opt.e);
-    tempPoints.push({x:p.x,y:p.y});
-    if(tempPoints.length===2){
-        const val = prompt("Розмір:");
-        if(val){
-            addDimension(tempPoints[0],tempPoints[1],val);
-        }
-        tempPoints=[];
-    }
+// upload new photo
+document.getElementById("photoUpload").addEventListener("change",async e=>{
+if(!App.currentProjectId){alert("Спочатку вибери проект");return;}
+let file=e.target.files[0];
+const metadata={
+name:file.name,
+parents:[App.currentProjectId]
+};
+const form=new FormData();
+form.append("metadata",new Blob([JSON.stringify(metadata)],{type:"application/json"}));
+form.append("file",file);
+await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+{
+method:"POST",
+headers:{Authorization:"Bearer "+accessToken},
+body:form
+});
+loadPhotos();
+});
+
+// ---------------- JSON ENGINE ----------------
+async function loadJson(){
+const res=await gapi.client.drive.files.list({
+q:`name='${App.currentImageName}.json' and '${App.currentProjectId}' in parents and trashed=false`,
+fields:"files(id,name)"
+});
+if(!res.result.files.length){render();return;}
+App.jsonFileId=res.result.files[0].id;
+const file=await gapi.client.drive.files.get({
+fileId:App.jsonFileId,
+alt:"media"
+});
+App.lines=JSON.parse(file.body);
+render();
+}
+
+async function sync(){
+if(!App.isDirty){alert("Немає змін");return;}
+const data=new Blob([JSON.stringify(App.lines)],{type:"application/json"});
+if(App.jsonFileId){
+await fetch(`https://www.googleapis.com/upload/drive/v3/files/${App.jsonFileId}?uploadType=media`,{
+method:"PATCH",
+headers:{Authorization:"Bearer "+accessToken},
+body:data
+});
+}else{
+const metadata={
+name:`${App.currentImageName}.json`,
+parents:[App.currentProjectId]
+};
+const form=new FormData();
+form.append("metadata",new Blob([JSON.stringify(metadata)],{type:"application/json"}));
+form.append("file",data);
+let r=await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+{method:"POST",headers:{Authorization:"Bearer "+accessToken},body:form});
+let j=await r.json();
+App.jsonFileId=j.id;
+}
+App.isDirty=false;
+alert("Збережено");
+}
+
+// ---------------- DIMENSION ENGINE ----------------
+let temp=[];
+canvas.on("mouse:down",e=>{
+if(!canvas.backgroundImage)return;
+let p=canvas.getPointer(e.e);
+temp.push({x:p.x,y:p.y});
+if(temp.length===2){
+let val=prompt("Розмір:");
+if(val)addDimension(temp[0],temp[1],val);
+temp=[];
+}
 });
 
 function addDimension(p1,p2,val){
-
-    const img = canvas.backgroundImage;
-    const realW = img.width*img.scaleX;
-    const realH = img.height*img.scaleY;
-    const left = img.left-realW/2;
-    const top  = img.top-realH/2;
-
-    const rel={
-        p1:{x:(p1.x-left)/realW,y:(p1.y-top)/realH},
-        p2:{x:(p2.x-left)/realW,y:(p2.y-top)/realH},
-        val:val
-    };
-
-    AppState.lines.push(rel);
-    AppState.isDirty=true;
-    renderLines();
+let img=canvas.backgroundImage;
+let rw=img.width*img.scaleX;
+let rh=img.height*img.scaleY;
+let left=img.left-rw/2;
+let top=img.top-rh/2;
+App.lines.push({
+p1:{x:(p1.x-left)/rw,y:(p1.y-top)/rh},
+p2:{x:(p2.x-left)/rw,y:(p2.y-top)/rh},
+val:val
+});
+App.isDirty=true;
+render();
 }
 
-function renderLines(){
-    clearDimensions();
-    const img = canvas.backgroundImage;
-    if(!img) return;
-
-    const realW = img.width*img.scaleX;
-    const realH = img.height*img.scaleY;
-    const left = img.left-realW/2;
-    const top  = img.top-realH/2;
-
-    AppState.lines.forEach(l=>{
-        const x1=left+l.p1.x*realW;
-        const y1=top +l.p1.y*realH;
-        const x2=left+l.p2.x*realW;
-        const y2=top +l.p2.y*realH;
-
-        createVisualDimension(x1,y1,x2,y2,l.val);
-    });
-
-    canvas.renderAll();
+function render(){
+canvas.getObjects().forEach(o=>{
+if(o.type==="line"||o.type==="text")canvas.remove(o);
+});
+let img=canvas.backgroundImage;
+if(!img)return;
+let rw=img.width*img.scaleX;
+let rh=img.height*img.scaleY;
+let left=img.left-rw/2;
+let top=img.top-rh/2;
+App.lines.forEach((l,i)=>{
+let x1=left+l.p1.x*rw;
+let y1=top+l.p1.y*rh;
+let x2=left+l.p2.x*rw;
+let y2=top+l.p2.y*rh;
+let line=new fabric.Line([x1,y1,x2,y2],{stroke:"red",selectable:false});
+let text=new fabric.Text(l.val,{left:(x1+x2)/2,top:(y1+y2)/2,fill:"yellow",selectable:false});
+line.on("mousedblclick",()=>removeDimension(i));
+text.on("mousedblclick",()=>removeDimension(i));
+canvas.add(line,text);
+});
+canvas.renderAll();
 }
 
-function createVisualDimension(x1,y1,x2,y2,val){
-
-    const line = new fabric.Line([x1,y1,x2,y2],{stroke:"red",strokeWidth:2,selectable:false});
-    const text = new fabric.Text(val,{
-        left:(x1+x2)/2,
-        top:(y1+y2)/2,
-        fill:"yellow",
-        fontSize:16,
-        selectable:false
-    });
-
-    const groupId = Date.now()+Math.random();
-    line.groupId=groupId;
-    text.groupId=groupId;
-
-    line.on("mousedblclick",()=>removeDimension(groupId));
-    text.on("mousedblclick",()=>removeDimension(groupId));
-
-    canvas.add(line,text);
-}
-
-function removeDimension(id){
-    canvas.getObjects().forEach(o=>{
-        if(o.groupId===id) canvas.remove(o);
-    });
-    AppState.lines.splice(0,1);
-    AppState.isDirty=true;
-    canvas.renderAll();
-}
-
-function clearDimensions(){
-    canvas.getObjects().forEach(o=>{
-        if(o.type==="line"||o.type==="text") canvas.remove(o);
-    });
-}
-
-// ---------------- DRIVE ----------------
-
-async function loadFromDrive(){
-    if(!accessToken) return;
-
-    const q = `name='${AppState.currentPhotoName}.json'`;
-
-    const res = await gapi.client.drive.files.list({
-        q:q,
-        fields:"files(id,name)"
-    });
-
-    if(res.result.files.length===0){
-        renderLines();
-        return;
-    }
-
-    const file=res.result.files[0];
-    AppState.fileId=file.id;
-
-    const fileData=await gapi.client.drive.files.get({
-        fileId:file.id,
-        alt:"media"
-    });
-
-    AppState.lines=JSON.parse(fileData.body);
-    AppState.isDirty=false;
-    renderLines();
-}
-
-async function syncToDrive(){
-    if(!AppState.isDirty){ alert("Немає змін"); return; }
-
-    const data=JSON.stringify(AppState.lines);
-
-    if(AppState.fileId){
-        await gapi.client.drive.files.update({
-            fileId:AppState.fileId,
-            uploadType:"media",
-            body:data
-        });
-    }else{
-        const res=await gapi.client.drive.files.create({
-            resource:{name:`${AppState.currentPhotoName}.json`},
-            media:{mimeType:"application/json",body:data},
-            fields:"id"
-        });
-        AppState.fileId=res.result.id;
-    }
-
-    AppState.isDirty=false;
-    alert("Saved to Drive");
+function removeDimension(i){
+App.lines.splice(i,1);
+App.isDirty=true;
+render();
 }
 
 // ---------------- ZOOM ----------------
-
-canvas.on("mouse:wheel", function(opt){
-    let zoom=canvas.getZoom();
-    zoom*=0.999**opt.e.deltaY;
-    if(zoom>5) zoom=5;
-    if(zoom<0.2) zoom=0.2;
-    canvas.zoomToPoint({x:opt.e.offsetX,y:opt.e.offsetY},zoom);
-    opt.e.preventDefault();
-    opt.e.stopPropagation();
+canvas.on("mouse:wheel",function(opt){
+let z=canvas.getZoom();
+z*=0.999**opt.e.deltaY;
+if(z>5)z=5;
+if(z<0.3)z=0.3;
+canvas.zoomToPoint({x:opt.e.offsetX,y:opt.e.offsetY},z);
+opt.e.preventDefault();
+opt.e.stopPropagation();
 });
 </script>
 </body>
 </html>
-
