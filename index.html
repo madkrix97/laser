@@ -45,6 +45,7 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
         <button id="syncBtn" class="btn btn-blue">☁️ СИНХРОНІЗУВАТИ</button>
         <button id="clearCacheBtn" class="btn btn-dark" style="font-size:10px;">♻️ ОЧИСТИТИ ЛОКАЛЬНУ ПАМ'ЯТЬ</button>
         <button id="exportBtn" class="btn btn-green">📥 ЗАВАНТАЖИТИ JPG</button>
+        <button id="delPhotoBtn" class="btn btn-red" style="margin-top: 5px;">🗑️ ВИДАЛИТИ ФОТО</button>
     </div>
     <div id="project-list"></div>
     <div id="status-bar">Система готова</div>
@@ -273,6 +274,56 @@ function exportCurrentPhoto() {
     setStatus("✅ Фото збережено!");
 }
 
+async function deleteCurrentPhoto() {
+    if (!currentPhotoId || !currentFolderId) {
+        alert("Оберіть фото для видалення");
+        return;
+    }
+
+    const confirmDel = confirm("Видалити це фото та всі його розміри з Google Drive?");
+    if (!confirmDel) return;
+
+    setStatus("🗑️ Видалення...");
+
+    try {
+        // 1. Видаляємо саме фото
+        await gapi.client.drive.files.delete({ fileId: currentPhotoId });
+
+        // 2. Шукаємо і видаляємо всі JSON, що належать цьому фото
+        const res = await gapi.client.drive.files.list({
+            q: `name contains 'data_${currentPhotoId}' and '${currentFolderId}' in parents and trashed=false`
+        });
+
+        if (res.result.files && res.result.files.length > 0) {
+            for (const file of res.result.files) {
+                await gapi.client.drive.files.delete({ fileId: file.id });
+            }
+        }
+
+        // 3. Очищуємо локальний кеш, щоб дані не "воскресли"
+        delete lineDataCache[currentPhotoId];
+        localStorage.setItem('laser_offline_cache', JSON.stringify(lineDataCache));
+
+        setStatus("✅ Видалено");
+        
+        // 4. Оновлюємо інтерфейс
+        canvas.clear();
+        canvas.setBackgroundImage(null, canvas.renderAll.bind(canvas));
+        currentPhotoId = null;
+        loadPhotos(); // Перезавантажуємо стрічку прев'ю
+
+    } catch (e) {
+        console.error(e);
+        setStatus("❌ Помилка видалення");
+    }
+}
+
+
+
+
+
+
+    
     
 // ---------------- AUTH & START ----------------
 
@@ -347,6 +398,7 @@ async function fetchPhoto(id){
 // ---------------- BUTTONS ----------------
 
 document.getElementById('exportBtn').onclick = exportCurrentPhoto;
+document.getElementById('delPhotoBtn').onclick = deleteCurrentPhoto;
     
 document.getElementById('authBtn').onclick=()=>tokenClient?.requestAccessToken();
 document.getElementById('syncBtn').onclick=syncAll;
