@@ -158,19 +158,61 @@ function initCanvas(){
     canvas.on('object:moving', (e) => { if(e.target.owner) updateDimension(e.target.owner); });
     canvas.on('object:modified', saveToLocal);
 }
+function createDimension(p1, p2, val = "0.000") {
+    // Властивості вузлів (точок)
+    const props = {
+        radius: 12, // Трохи збільшимо радіус для зручності натискання пальцем
+        fill: 'rgba(255,149,0,0.8)',
+        originX: 'center',
+        originY: 'center',
+        hasControls: false,
+        hasBorders: false,
+        role: 'node',
+        evented: true // Гарантуємо, що точка реагує на дотик
+    };
 
-function createDimension(p1, p2, val="0.000"){
-    const props={radius:10, fill:'rgba(255,149,0,0.8)', originX:'center', originY:'center', hasControls:false, hasBorders:false, role:'node'};
-    const n1=new fabric.Circle({...props, left:p1.x, top:p1.y});
-    const n2=new fabric.Circle({...props, left:p2.x, top:p2.y});
-    const line=new fabric.Line([p1.x,p1.y,p2.x,p2.y], {stroke:'#FF9500', strokeWidth:3, selectable:false, evented:false});
-    const text=new fabric.Text(val, {fontSize:18, fill:'white', backgroundColor:'black', originX:'center', originY:'center', hasControls:false});
-    const owner={n1,n2,line,text};
-    n1.owner=n2.owner=text.owner=owner;
+    const n1 = new fabric.Circle({ ...props, left: p1.x, top: p1.y });
+    const n2 = new fabric.Circle({ ...props, left: p2.x, top: p2.y });
     
-    text.on('mousedown', () => {
-        const v = prompt("Розмір:", text.text);
-        if(v) { text.set('text', v); canvas.renderAll(); saveToLocal(); }
+    const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
+        stroke: '#FF9500',
+        strokeWidth: 3,
+        selectable: false,
+        evented: false // Лінія не повинна заважати натисканню на текст
+    });
+
+    const text = new fabric.Text(val, {
+        fontSize: 20,
+        fill: 'white',
+        backgroundColor: 'black',
+        originX: 'center',
+        originY: 'center',
+        hasControls: false,
+        selectable: false,
+        evented: true,    // Дуже важливо для кліку
+        padding: 15       // Створює невидиму активну зону навколо тексту (зручно для пальців)
+    });
+
+    const owner = { n1, n2, line, text };
+    n1.owner = n2.owner = text.owner = owner;
+
+    // ОБРОБНИК НАТИСКАННЯ НА ТЕКСТ
+    text.on('mousedown', (opt) => {
+        // Зупиняємо подію, щоб канвас не почав малювати нову лінію під текстом
+        if (opt.e) {
+            opt.e.preventDefault();
+            opt.e.stopPropagation();
+        }
+
+        // Викликаємо вікно введення
+        const v = prompt("Введіть розмір (наприклад, 1.250):", text.text);
+        
+        // Перевірка v !== null дозволяє натиснути "Скасувати" без видалення тексту
+        if (v !== null && v.trim() !== "") {
+            text.set('text', v);
+            canvas.renderAll();
+            saveToLocal();
+        }
     });
 
     canvas.add(line, text, n1, n2);
