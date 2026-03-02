@@ -46,6 +46,7 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
         <button id="clearCacheBtn" class="btn btn-dark" style="font-size:10px;">♻️ ОЧИСТИТИ ЛОКАЛЬНУ ПАМ'ЯТЬ</button>
         <button id="exportBtn" class="btn btn-green">📥 ЗАВАНТАЖИТИ JPG</button>
         <button id="delPhotoBtn" class="btn btn-red" style="margin-top: 5px;">🗑️ ВИДАЛИТИ ФОТО</button>
+        <button id="textModeBtn" class="btn">✏️ ТЕКСТ</button>
     </div>
     <div id="project-list"></div>
     <div id="status-bar">Система готова</div>
@@ -173,21 +174,34 @@ function initCanvas(){
     });
 
     // 2. МАЛЮВАННЯ (на одинарний клік)
-    canvas.on('mouse:down', (opt) => {
-        // Якщо натиснули на точку або текст — не малюємо нову лінію
-        if (opt.target) return;
-
-        if (isDrawingMode) {
-            const pointer = canvas.getPointer(opt.e);
-            if (!firstPoint) {
-                firstPoint = { x: pointer.x, y: pointer.y };
-            } else {
-                createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
+canvas.on('mouse:down', (opt) => {
+    // ЯКЩО ВКЛЮЧЕНО РЕЖИМ ТЕКСТУ
+    if (isTextMode && opt.target) {
+        let targetText = (opt.target.type === 'text') ? opt.target : (opt.target.owner ? opt.target.owner.text : null);
+        
+        if (targetText) {
+            const v = prompt("Введіть розмір:", targetText.text);
+            if (v !== null) {
+                targetText.set('text', v);
+                canvas.renderAll();
                 saveToLocal();
-                firstPoint = null;
             }
+            return; // Виходимо, щоб нічого не рухати
         }
-    });
+    }
+
+    // ЯКЩО ВКЛЮЧЕНО РЕЖИМ МАЛЮВАННЯ
+    if (isDrawingMode && !opt.target) {
+        const pointer = canvas.getPointer(opt.e);
+        if (!firstPoint) {
+            firstPoint = { x: pointer.x, y: pointer.y };
+        } else {
+            createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
+            saveToLocal();
+            firstPoint = null;
+        }
+    }
+});
 
     canvas.on('object:moving', (e) => { 
         if(e.target.owner) updateDimension(e.target.owner); 
@@ -455,6 +469,22 @@ async function fetchPhoto(id){
 }
 
 // ---------------- BUTTONS ----------------
+let isDrawingMode = false;
+let isTextMode = false; // Новий режим
+
+document.getElementById('textModeBtn').onclick = () => {
+    isTextMode = !isTextMode;
+    isDrawingMode = false; // Вимикаємо малювання, якщо вмикаємо текст
+    
+    // Візуально підсвічуємо кнопку
+    document.getElementById('textModeBtn').style.background = isTextMode ? '#FF9500' : '#444';
+    document.getElementById('drawModeBtn').style.background = '#444';
+    
+    setStatus(isTextMode ? "✏️ Режим редагування тексту" : "👀 Режим перегляду");
+};
+
+
+    
 
 document.getElementById('exportBtn').onclick = exportCurrentPhoto;
 document.getElementById('delPhotoBtn').onclick = deleteCurrentPhoto;
