@@ -151,11 +151,40 @@ async function syncAll() {
 // ---------------- CANVAS LOGIC ----------------
 
 function initCanvas(){
-    const wrapper=document.getElementById('canvas-wrapper');
+    const wrapper = document.getElementById('canvas-wrapper');
     if(canvas) canvas.dispose();
-    canvas=new fabric.Canvas('c',{width:wrapper.clientWidth, height:wrapper.clientHeight, selection:false, backgroundColor:'#111'});
     
-    canvas.on('object:moving', (e) => { if(e.target.owner) updateDimension(e.target.owner); });
+    // Створюємо канвас
+    canvas = new fabric.Canvas('c', {
+        width: wrapper.clientWidth, 
+        height: wrapper.clientHeight, 
+        selection: false, 
+        backgroundColor: '#111'
+    });
+
+    // 1. ГОЛОВНЕ ДОДАВАННЯ: Обробник натискання на об'єкти
+    canvas.on('mouse:down', (opt) => {
+        // Якщо ми натиснули на текст (або будь-який об'єкт)
+        if (opt.target && opt.target.type === 'text') {
+            // Зупиняємо малювання нової лінії, щоб воно не заважало
+            if (opt.e) opt.e.stopPropagation();
+            
+            // Викликаємо вікно введення
+            const v = prompt("Введіть розмір:", opt.target.text);
+            if (v !== null && v.trim() !== "") {
+                opt.target.set('text', v);
+                canvas.renderAll();
+                saveToLocal();
+            }
+        }
+    });
+
+    // Оновлення ліній при перетягуванні точок
+    canvas.on('object:moving', (e) => { 
+        if(e.target.owner) updateDimension(e.target.owner); 
+    });
+
+    // Збереження після будь-яких змін
     canvas.on('object:modified', saveToLocal);
 }
 function createDimension(p1, p2, val = "0.000") {
