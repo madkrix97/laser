@@ -174,58 +174,112 @@ async function syncAll() {
 function initCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
     if (canvas) canvas.dispose();
-    canvas = new fabric.Canvas('c', { width: wrapper.clientWidth, height: wrapper.clientHeight, selection: false, backgroundColor: '#111' });
+    canvas = new fabric.Canvas('c', { 
+        width: wrapper.clientWidth, 
+        height: wrapper.clientHeight, 
+        selection: false, 
+        backgroundColor: '#111' 
+    });
 
     let isMultiTouch = false, lastTouchDist = 0, lastTouchMid = { x: 0, y: 0 };
     const mag = document.getElementById('magnifier');
 
+    // Внутрішня функція для оновлення лупи
+    const updateMag = (evt) => {
+        const pointer = canvas.getPointer(evt);
+        const touch = evt.touches ? evt.touches[0] : evt;
+        
+        mag.style.display = 'block';
+        mag.style.left = (touch.clientX - 75) + 'px';
+        mag.style.top = (touch.clientY - 180) + 'px'; // Вище пальця
+
+        mCtx.fillStyle = '#111'; 
+        mCtx.fillRect(0, 0, 150, 150);
+        mCtx.save();
+        mCtx.translate(75, 75);
+        // Масштаб лупи (2.5) * поточний зум канвасу
+        mCtx.scale(2.5 * canvas.getZoom(), 2.5 * canvas.getZoom());
+        mCtx.translate(-pointer.x, -pointer.y);
+        canvas.renderCanvas(mCtx, canvas.getObjects());
+        mCtx.restore();
+
+        // Приціл
+        mCtx.strokeStyle = '#FF9500';
+        mCtx.lineWidth = 1.5;
+        mCtx.beginPath();
+        mCtx.moveTo(75, 60); mCtx.lineTo(75, 90);
+        mCtx.moveTo(60, 75); mCtx.lineTo(90, 75);
+        mCtx.stroke();
+    };
+
     canvas.on('mouse:down', (opt) => {
         const evt = opt.e;
+        // Мультитач (зум)
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true; firstPoint = null; mag.style.display = 'none';
             lastTouchDist = Math.hypot(evt.touches[0].clientX - evt.touches[1].clientX, evt.touches[0].clientY - evt.touches[1].clientY);
             lastTouchMid = { x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2, y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2 };
             return;
         }
-        if (opt.target && opt.target.role === 'node') mag.style.display = 'block';
+
+        // Вмикаємо лупу при натисканні (якщо малюємо або рухаємо вузол)
+        if (isDrawingMode || (opt.target && opt.target.role === 'node')) {
+            updateMag(evt);
+        }
+
+        // Логіка малювання
         if (isDrawingMode && !isMultiTouch && !opt.target) {
             const pointer = canvas.getPointer(evt);
-            if (!firstPoint) firstPoint = { x: pointer.x, y: pointer.y };
-            else { createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0"); firstPoint = null; }
+            if (!firstPoint) {
+                firstPoint = { x: pointer.x, y: pointer.y };
+            } else {
+                createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0");
+                firstPoint = null;
+            }
         }
+
+        // Редагування тексту
         if (!isDrawingMode && opt.target && opt.target.type === 'text') {
             const v = prompt("Розмір:", opt.target.text);
-            if (v) { opt.target.set('text', v); canvas.renderAll(); saveToLocal(); }
+            if (v !== null) { opt.target.set('text', v); canvas.renderAll(); saveToLocal(); }
         }
     });
 
     canvas.on('mouse:move', (opt) => {
         const evt = opt.e;
-        if (opt.target && opt.target.role === 'node' && !isMultiTouch) {
-            const pointer = canvas.getPointer(evt);
-            const touch = evt.touches ? evt.touches[0] : evt;
-            mag.style.left = (touch.clientX - 75) + 'px';
-            mag.style.top = (touch.clientY - 160) + 'px';
-            mCtx.fillStyle = '#111'; mCtx.fillRect(0,0,150,150);
-            mCtx.save(); mCtx.translate(75, 75); mCtx.scale(2.5 * canvas.getZoom(), 2.5 * canvas.getZoom());
-            mCtx.translate(-pointer.x, -pointer.y); canvas.renderCanvas(mCtx, canvas.getObjects()); mCtx.restore();
-            mCtx.strokeStyle = '#FF9500'; mCtx.beginPath(); mCtx.moveTo(75,65); mCtx.lineTo(75,85); mCtx.moveTo(65,75); mCtx.lineTo(85,75); mCtx.stroke();
+        
+        // Оновлюємо лупу при русі
+        if (!isMultiTouch && (isDrawingMode || (opt.target && opt.target.role === 'node'))) {
+            updateMag(evt);
         }
+
+        // Логіка панорамування/зуму (мультитач)
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
             const currentMid = { x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2, y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2 };
             const vpt = canvas.viewportTransform;
-            vpt[4] += currentMid.x - lastTouchMid.x; vpt[5] += currentMid.y - lastTouchMid.y;
+            vpt[4] += currentMid.x - lastTouchMid.x;
+            vpt[5] += currentMid.y - lastTouchMid.y;
             const currentDist = Math.hypot(evt.touches[0].clientX - evt.touches[1].clientX, evt.touches[0].clientY - evt.touches[1].clientY);
             canvas.zoomToPoint({ x: currentMid.x, y: currentMid.y }, canvas.getZoom() * (currentDist / lastTouchDist));
-            lastTouchDist = currentDist; lastTouchMid = currentMid; canvas.requestRenderAll();
+            lastTouchDist = currentDist;
+            lastTouchMid = currentMid;
+            canvas.requestRenderAll();
         }
     });
 
-    canvas.on('mouse:up', () => { isMultiTouch = false; mag.style.display = 'none'; });
-    canvas.on('object:moving', (e) => { if (e.target.owner) updateDimension(e.target.owner); });
+    canvas.on('mouse:up', () => { 
+        isMultiTouch = false; 
+        mag.style.display = 'none'; 
+    });
+
+    canvas.on('object:moving', (e) => { 
+        if (e.target.owner) updateDimension(e.target.owner); 
+    });
+    
     canvas.on('object:modified', saveToLocal);
 }
 
+    
 function createDimension(p1, p2, val) {
     const nodeProps = { radius: 22, fill: 'rgba(255,149,0,0.05)', originX:'center', originY:'center', hasControls:false, hasBorders:false, role:'node' };
     const n1 = new fabric.Circle({ ...nodeProps, left: p1.x, top: p1.y });
