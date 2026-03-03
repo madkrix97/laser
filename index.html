@@ -30,6 +30,7 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 #status-bar {font-size:11px;color:var(--green);padding:5px;text-align:center;background:#000;border-top: 1px solid #333;}
 #net-status{ display:flex; align-items:center; gap:8px; font-size:12px; padding:6px 12px; border-radius:20px; background:#1e1e1e; width:max-content; margin: 0 auto;}
 #net-status .dot{ width:8px; height:8px; border-radius:50%; background:gray; }
+#c { touch-action: none; }
 </style>
 </head>
 <body>
@@ -158,10 +159,27 @@ function initCanvas(){
         width: wrapper.clientWidth, 
         height: wrapper.clientHeight, 
         selection: false, 
-        backgroundColor: '#111'
+        backgroundColor: '#111',
+        allowTouchScrolling: false // Важливо для планшетів
     });
 
-    // 1. РЕДАГУВАННЯ: Подвійний клік по будь-чому, що має owner
+    // --- ЗМІННІ ДЛЯ ЗУМУ ТА ПАНІНГУ ---
+    let isDragging = false;
+    let lastPosX, lastPosY;
+
+    // 1. ZOOM (Мишка + Тачпад)
+    canvas.on('mouse:wheel', function(opt) {
+        const delta = opt.e.deltaY;
+        let zoom = canvas.getZoom();
+        zoom *= 0.999 ** delta;
+        if (zoom > 20) zoom = 20;
+        if (zoom < 0.1) zoom = 0.1;
+        canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+        opt.e.preventDefault();
+        opt.e.stopPropagation();
+    });
+
+    // 2. РЕДАГУВАННЯ: Подвійний клік
     canvas.on('mouse:dblclick', (opt) => {
         if (opt.target && opt.target.owner) {
             const targetText = opt.target.owner.text;
@@ -174,10 +192,20 @@ function initCanvas(){
         }
     });
 
-    // 2. МАЛЮВАННЯ: Одинарний клік
-    canvas.on('mouse:down', (opt) => {
-        if (opt.target) return; // Якщо влучили в точку/лінію — не малюємо нову
+    // 3. ПАНІНГ (Alt + мишка) та МАЛЮВАННЯ
+    canvas.on('mouse:down', function(opt) {
+        const evt = opt.e;
+        
+        // Режим перетягування (якщо затиснуто Alt)
+        if (evt.altKey === true) {
+            isDragging = true;
+            lastPosX = evt.clientX;
+            lastPosY = evt.clientY;
+            return; 
+        }
 
+        // Логіка малювання (як і була)
+        if (opt.target) return; 
         if (isDrawingMode) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
@@ -190,6 +218,44 @@ function initCanvas(){
         }
     });
 
+    canvas.on('mouse:move', function(opt) {
+        if (isDragging) {
+            const e = opt.e;
+            const vpt = this.viewportTransform;
+            vpt[4] += e.clientX - lastPosX;
+            vpt[5] += e.clientY - lastPosY;
+            this.requestRenderAll();
+            lastPosX = e.clientX;
+            lastPosY = e.clientY;
+        }
+    });
+
+    canvas.on('mouse:up', function() {
+        isDragging = false;
+    });
+
+    // 4. ЖЕСТИ ДЛЯ ПЛАНШЕТА (Zoom & Pan двома пальцями)
+    canvas.on('touch:gesture', function(opt) {
+        if (opt.e.touches && opt.e.touches.length === 2) {
+            const point = new fabric.Point(opt.self.x, opt.self.y);
+            let zoom = canvas.getZoom();
+            zoom *= opt.self.scale;
+            if (zoom > 20) zoom = 20;
+            if (zoom < 0.1) zoom = 0.1;
+            canvas.zoomToPoint(point, zoom);
+        }
+    });
+
+    canvas.on('touch:drag', function(opt) {
+        if (opt.e.touches && opt.e.touches.length === 2) {
+            const vpt = canvas.viewportTransform;
+            vpt[4] += opt.self.dx;
+            vpt[5] += opt.self.dy;
+            canvas.requestRenderAll();
+        }
+    });
+
+    // СТАНДАРТНІ ОБРОБНИКИ (як і були)
     canvas.on('object:moving', (e) => { 
         if(e.target.owner) updateDimension(e.target.owner); 
     });
