@@ -200,15 +200,19 @@ function initCanvas(){
 
 function createDimension(p1, p2, val = "0.000") {
     // 1. ТЕХНІЧНІ ТОЧКИ (Прозорі, але великі для дотику)
-    const nodeProps = {
-        radius: 15,          // Велика зона для пальця
-        fill: 'rgba(0,0,0,0)', // ПОВНІСТЮ ПРОЗОРА
-        stroke: 'rgba(255,149,0,0.3)', // Тонкий напівпрозорий контур (щоб бачити, де вузол)
-        strokeWidth: 1,
-        originX: 'center', originY: 'center',
-        hasControls: false, hasBorders: false,
-        selectable: true, evented: true, role: 'node'
-    };
+const nodeProps = {
+    radius: 15,            // Область залишається великою для зручності
+    fill: 'rgba(0,0,0,0)', // Повністю прозоре залиття
+    stroke: 'rgba(0,0,0,0)', // Повністю прозорий контур
+    originX: 'center', 
+    originY: 'center',
+    hasControls: false,    // Прибираємо квадратики керування
+    hasBorders: false,     // Прибираємо синю рамку навколо при кліку
+    selectable: true, 
+    evented: true, 
+    role: 'node',
+    hoverCursor: 'move'    // Змінюємо курсор на "руку" при наведенні, щоб ти знав, де хапати
+};
 
     const n1 = new fabric.Circle({ ...nodeProps, left: p1.x, top: p1.y });
     const n2 = new fabric.Circle({ ...nodeProps, left: p2.x, top: p2.y });
