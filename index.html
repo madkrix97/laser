@@ -178,9 +178,8 @@ function initCanvas() {
         stopContextMenu: true 
     });
 
-    // --- КРИТИЧНІ НАЛАШТУВАННЯ ДЛЯ ТАЧ-ЕКРАНІВ ---
-    canvas.perPixelTargetFind = true; // Важливо: не ловити кліки на прозорих областях
-    canvas.targetFindTolerance = 15;  // Полегшує попадання пальцем по точці
+    canvas.perPixelTargetFind = true; 
+    canvas.targetFindTolerance = 20; // Збільшено для легшого попадання пальцем
     canvas.preserveObjectStacking = true;
 
     let isDragging = false;
@@ -189,7 +188,6 @@ function initCanvas() {
     let lastTouchDist = 0;
     let lastTouchMid = { x: 0, y: 0 };
 
-    // ZOOM МИШКОЮ
     canvas.on('mouse:wheel', function(opt) {
         const delta = opt.e.deltaY;
         let zoom = canvas.getZoom() * (0.999 ** delta);
@@ -200,24 +198,16 @@ function initCanvas() {
         opt.e.stopPropagation();
     });
 
-    // РЕДАГУВАННЯ (Подвійний клік - для ПК)
-    canvas.on('mouse:dblclick', (opt) => {
-        if (opt.target && opt.target.owner) {
-            const textObj = opt.target.owner.text;
-            openTextEditor(textObj);
-        }
-    });
-
-    // DOWN: Початок малювання, зуму або редагування
+    // Універсальний обробник натискання
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
 
-        // ПЛАНШЕТ: 2 пальці — це ЗАВЖДИ зум
+        // 1. МУЛЬТИТАЧ (ЗУМ)
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             isDragging = false;
-            firstPoint = null;
-            canvas.discardActiveObject(); // Звільняємо канвас для жесту
+            firstPoint = null; 
+            canvas.discardActiveObject();
             
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
@@ -227,49 +217,49 @@ function initCanvas() {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
-            canvas.requestRenderAll();
             return;
         }
 
-        // РЕДАГУВАННЯ (Один тап на текст, коли режим малювання ВИМКНЕНО)
+        // 2. РЕДАГУВАННЯ ТЕКСТУ
         if (!isDrawingMode && opt.target && opt.target.type === 'text') {
             openTextEditor(opt.target);
             return;
         }
 
-        // ПАНІНГ (Alt)
+        // 3. ПЕРЕМІЩЕННЯ ВУЗЛА (Якщо натиснули на точку — не малюємо!)
+        if (opt.target && opt.target.role === 'node') {
+            return; // Fabric сам почне переміщення об'єкта
+        }
+
+        // 4. ПАНІНГ (Alt)
         if (evt.altKey) {
             isDragging = true;
             lastPosX = evt.clientX;
             lastPosY = evt.clientY;
-            canvas.discardActiveObject();
             return;
         }
 
-        // МАЛЮВАННЯ
-        if (isDrawingMode && !opt.target && !isMultiTouch) {
+        // 5. МАЛЮВАННЯ ЛІНІЇ
+        if (isDrawingMode && !isMultiTouch) {
             const pointer = canvas.getPointer(evt);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
             } else {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 firstPoint = null;
-                canvas.discardActiveObject(); // Важливо: знімаємо фокус після малювання
-                canvas.renderAll();
+                canvas.discardActiveObject();
+                canvas.requestRenderAll();
             }
         }
     });
 
-    // MOVE: Зум та Панінг
     canvas.on('mouse:move', function(opt) {
         const evt = opt.e;
-
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
             const currentMid = {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
-            
             const vpt = canvas.viewportTransform;
             vpt[4] += currentMid.x - lastTouchMid.x;
             vpt[5] += currentMid.y - lastTouchMid.y;
@@ -280,7 +270,6 @@ function initCanvas() {
             );
             const zoomDelta = currentDist / lastTouchDist;
             let newZoom = canvas.getZoom() * zoomDelta;
-            
             if (newZoom > 20) newZoom = 20;
             if (newZoom < 0.05) newZoom = 0.05;
 
@@ -327,10 +316,11 @@ function openTextEditor(textObj) {
         }
     }, 100);
 }
+
 function createDimension(p1, p2, val = "0.000") {
     const nodeProps = {
-        radius: 15,
-        fill: 'rgba(0,0,0,0)', 
+        radius: 20, // Трохи більше для планшета
+        fill: 'rgba(255,149,0,0.05)', // Ледь помітний колір, щоб ви знали куди тиснути
         stroke: 'rgba(0,0,0,0)',
         originX: 'center', 
         originY: 'center',
@@ -338,6 +328,7 @@ function createDimension(p1, p2, val = "0.000") {
         hasBorders: false,
         selectable: true,
         evented: true,
+        role: 'node', // ВАЖЛИВО для логіки переміщення
         hoverCursor: 'move'
     };
 
@@ -346,16 +337,16 @@ function createDimension(p1, p2, val = "0.000") {
     
     const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
         stroke: '#FF9500', 
-        strokeWidth: 1,
+        strokeWidth: 1.5,
         selectable: false,
-        evented: false // Лінія не повинна перехоплювати кліки
+        evented: false // Лінія не заважає клікати крізь неї
     });
 
     const tickProps = {
         stroke: '#FF9500',
         strokeWidth: 2,
         selectable: false,
-        evented: false, // Засічки не заважають
+        evented: false,
         strokeLineCap: 'round'
     };
 
@@ -365,26 +356,28 @@ function createDimension(p1, p2, val = "0.000") {
     const text = new fabric.Text(val, {
         fontSize: 14,
         fill: 'white',
-        backgroundColor: 'rgba(0,0,0,0.7)', 
+        backgroundColor: 'rgba(0,0,0,0.8)', 
         originX: 'center', 
         originY: 'center',
         hasControls: false, 
         selectable: true, 
         evented: true,
-        padding: 5,
-        fontFamily: 'monospace'
+        padding: 5
     });
 
     const owner = { n1, n2, line, text, tick1, tick2 };
     n1.owner = n2.owner = text.owner = line.owner = tick1.owner = tick2.owner = owner;
 
-    // Додаємо в порядку черги (шари)
+    // Додаємо: лінія і засічки знизу, вузли n1, n2 — зверху
     canvas.add(line, tick1, tick2, text, n1, n2);
     
     updateDimension(owner);
     canvas.requestRenderAll();
     saveToLocal();
 }
+
+
+    
 function updateDimension(owner) {
     if (!owner) return;
     const { n1, n2, line, text, tick1, tick2 } = owner;
