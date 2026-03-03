@@ -607,9 +607,17 @@ document.getElementById('drawModeBtn').onclick=function(){
     } else { canvas.off('mouse:down'); firstPoint=null; }
 };
 
-document.getElementById('delObjBtn').onclick=()=>{
-    const act=canvas.getActiveObject();
-    if(act && act.owner) { canvas.remove(act.owner.n1, act.owner.n2, act.owner.line, act.owner.text); saveToLocal(); }
+document.getElementById('delObjBtn').onclick = () => {
+    const act = canvas.getActiveObject();
+    if (act && act.owner) {
+        const o = act.owner;
+        // Додаємо tick1 та tick2 у список на видалення
+        canvas.remove(o.n1, o.n2, o.line, o.text, o.tick1, o.tick2); 
+        
+        saveToLocal();
+        canvas.discardActiveObject(); // Знімаємо виділення з видаленого об'єкта
+        canvas.renderAll();
+    }
 };
 
 document.getElementById('newProjectBtn').onclick = async () => {
