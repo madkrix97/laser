@@ -172,15 +172,17 @@ function initCanvas() {
     canvas = new fabric.Canvas('c', {
         width: wrapper.clientWidth,
         height: wrapper.clientHeight,
-        selection: false,
+        selection: false, // Вимикаємо рамку групового виділення
         backgroundColor: '#111',
         allowTouchScrolling: false,
-        stopContextMenu: true 
+        stopContextMenu: true,
+        preserveObjectStacking: true
     });
 
-    canvas.perPixelTargetFind = true; 
-    canvas.targetFindTolerance = 20; // Збільшено для легшого попадання пальцем
-    canvas.preserveObjectStacking = true;
+    // --- ФІКС ДЛЯ ПЛАНШЕТА ---
+    // Об'єкти НЕ стають активними при натисканні. Це звільняє канвас для зуму.
+    canvas.on('selection:created', (e) => canvas.discardActiveObject());
+    canvas.on('selection:updated', (e) => canvas.discardActiveObject());
 
     let isDragging = false;
     let lastPosX, lastPosY;
@@ -188,6 +190,7 @@ function initCanvas() {
     let lastTouchDist = 0;
     let lastTouchMid = { x: 0, y: 0 };
 
+    // ZOOM МИШКОЮ
     canvas.on('mouse:wheel', function(opt) {
         const delta = opt.e.deltaY;
         let zoom = canvas.getZoom() * (0.999 ** delta);
@@ -198,16 +201,16 @@ function initCanvas() {
         opt.e.stopPropagation();
     });
 
-    // Універсальний обробник натискання
+    // DOWN: Малювання / Зум
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
 
-        // 1. МУЛЬТИТАЧ (ЗУМ)
+        // 1. ДВА ПАЛЬЦІ = ТІЛЬКИ ЗУМ
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             isDragging = false;
-            firstPoint = null; 
-            canvas.discardActiveObject();
+            firstPoint = null;
+            canvas.discardActiveObject(); // Примусово знімаємо фокус
             
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
@@ -220,39 +223,29 @@ function initCanvas() {
             return;
         }
 
-        // 2. РЕДАГУВАННЯ ТЕКСТУ
+        // 2. РЕДАГУВАННЯ ТЕКСТУ (через функцію openTextEditor)
         if (!isDrawingMode && opt.target && opt.target.type === 'text') {
             openTextEditor(opt.target);
             return;
         }
 
-        // 3. ПЕРЕМІЩЕННЯ ВУЗЛА (Якщо натиснули на точку — не малюємо!)
-        if (opt.target && opt.target.role === 'node') {
-            return; // Fabric сам почне переміщення об'єкта
-        }
-
-        // 4. ПАНІНГ (Alt)
-        if (evt.altKey) {
-            isDragging = true;
-            lastPosX = evt.clientX;
-            lastPosY = evt.clientY;
-            return;
-        }
-
-        // 5. МАЛЮВАННЯ ЛІНІЇ
-        if (isDrawingMode && !isMultiTouch) {
+        // 3. МАЛЮВАННЯ ЛІНІЇ
+        // Малюємо тільки якщо натиснули на ПУСТЕ місце (не на точку/текст)
+        if (isDrawingMode && !isMultiTouch && !opt.target) {
             const pointer = canvas.getPointer(evt);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
             } else {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 firstPoint = null;
+                // ПІСЛЯ МАЛЮВАННЯ: Повна деактивація
                 canvas.discardActiveObject();
-                canvas.requestRenderAll();
+                canvas.renderAll();
             }
         }
     });
 
+    // MOVE: Рух камери
     canvas.on('mouse:move', function(opt) {
         const evt = opt.e;
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
@@ -269,27 +262,13 @@ function initCanvas() {
                 evt.touches[0].clientY - evt.touches[1].clientY
             );
             const zoomDelta = currentDist / lastTouchDist;
-            let newZoom = canvas.getZoom() * zoomDelta;
-            if (newZoom > 20) newZoom = 20;
-            if (newZoom < 0.05) newZoom = 0.05;
-
-            const pointer = canvas.getPointer({ clientX: currentMid.x, clientY: currentMid.y });
-            canvas.zoomToPoint({ x: pointer.x, y: pointer.y }, newZoom);
+            canvas.zoomToPoint({ x: currentMid.x, y: currentMid.y }, canvas.getZoom() * zoomDelta);
 
             lastTouchDist = currentDist;
             lastTouchMid = currentMid;
             canvas.requestRenderAll();
             if (evt.cancelable) evt.preventDefault();
             return;
-        }
-
-        if (isDragging) {
-            const vpt = this.viewportTransform;
-            vpt[4] += evt.clientX - lastPosX;
-            vpt[5] += evt.clientY - lastPosY;
-            lastPosX = evt.clientX;
-            lastPosY = evt.clientY;
-            this.requestRenderAll();
         }
     });
 
@@ -319,16 +298,16 @@ function openTextEditor(textObj) {
 
 function createDimension(p1, p2, val = "0.000") {
     const nodeProps = {
-        radius: 20, // Трохи більше для планшета
-        fill: 'rgba(255,149,0,0.05)', // Ледь помітний колір, щоб ви знали куди тиснути
+        radius: 20,
+        fill: 'rgba(255,149,0,0.05)', 
         stroke: 'rgba(0,0,0,0)',
         originX: 'center', 
         originY: 'center',
-        hasControls: false,
-        hasBorders: false,
+        hasControls: false, // Прибираємо рамки керування
+        hasBorders: false,  // Прибираємо синю рамку
         selectable: true,
         evented: true,
-        role: 'node', // ВАЖЛИВО для логіки переміщення
+        role: 'node',
         hoverCursor: 'move'
     };
 
@@ -339,7 +318,7 @@ function createDimension(p1, p2, val = "0.000") {
         stroke: '#FF9500', 
         strokeWidth: 1.5,
         selectable: false,
-        evented: false // Лінія не заважає клікати крізь неї
+        evented: false 
     });
 
     const tickProps = {
@@ -359,7 +338,8 @@ function createDimension(p1, p2, val = "0.000") {
         backgroundColor: 'rgba(0,0,0,0.8)', 
         originX: 'center', 
         originY: 'center',
-        hasControls: false, 
+        hasControls: false,
+        hasBorders: false, // ПРАВКА: прибираємо рамку навколо тексту
         selectable: true, 
         evented: true,
         padding: 5
@@ -368,14 +348,30 @@ function createDimension(p1, p2, val = "0.000") {
     const owner = { n1, n2, line, text, tick1, tick2 };
     n1.owner = n2.owner = text.owner = line.owner = tick1.owner = tick2.owner = owner;
 
-    // Додаємо: лінія і засічки знизу, вузли n1, n2 — зверху
+    // Додаємо об'єкти
     canvas.add(line, tick1, tick2, text, n1, n2);
     
     updateDimension(owner);
+
+    // --- КРИТИЧНІ ПРАВКИ НИЖЧЕ ---
+
+    // 1. Знімаємо виділення з усіх щойно створених об'єктів
+    canvas.discardActiveObject(); 
+
+    // 2. Вимикаємо можливість масштабування тексту/вузлів через рамку (якщо вона раптом з'явиться)
+    [n1, n2, text].forEach(obj => {
+        obj.set({
+            lockScalingX: true,
+            lockScalingY: true,
+            lockRotation: true,
+            hasControls: false,
+            hasBorders: false
+        });
+    });
+
     canvas.requestRenderAll();
     saveToLocal();
 }
-
 
     
 function updateDimension(owner) {
