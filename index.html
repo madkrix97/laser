@@ -173,15 +173,14 @@ function initCanvas(){
         height: wrapper.clientHeight, 
         selection: false, 
         backgroundColor: '#111',
-        allowTouchScrolling: false // Важливо для планшетів
+        allowTouchScrolling: false
     });
-canvas.allowTouchScrolling = false;
-canvas.isDrawingMode = false; // переконайся, що вбудоване малювання вимкнене
 
-    
     // --- ЗМІННІ ДЛЯ ЗУМУ ТА ПАНІНГУ ---
     let isDragging = false;
     let lastPosX, lastPosY;
+    let lastTouchDist = 0; // Для зуму на планшеті
+    let isMultiTouch = false;
 
     // 1. ZOOM (Мишка + Тачпад)
     canvas.on('mouse:wheel', function(opt) {
@@ -208,11 +207,23 @@ canvas.isDrawingMode = false; // переконайся, що вбудоване
         }
     });
 
-    // 3. ПАНІНГ (Alt + мишка) та МАЛЮВАННЯ
+    // 3. ПАНІНГ ТА МАЛЮВАННЯ
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
         
-        // Режим перетягування (якщо затиснуто Alt)
+        // Перевірка на мультитач (планшет)
+        if (evt.touches && evt.touches.length === 2) {
+            isMultiTouch = true;
+            isDragging = false;
+            firstPoint = null; // Скасовуємо малювання лінії
+            lastTouchDist = Math.hypot(
+                evt.touches[0].clientX - evt.touches[1].clientX,
+                evt.touches[0].clientY - evt.touches[1].clientY
+            );
+            return;
+        }
+
+        // Режим перетягування (Alt + мишка)
         if (evt.altKey === true) {
             isDragging = true;
             lastPosX = evt.clientX;
@@ -220,9 +231,9 @@ canvas.isDrawingMode = false; // переконайся, що вбудоване
             return; 
         }
 
-        // Логіка малювання (як і була)
+        // Логіка малювання
         if (opt.target) return; 
-        if (isDrawingMode) {
+        if (isDrawingMode && !isMultiTouch) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
@@ -235,49 +246,56 @@ canvas.isDrawingMode = false; // переконайся, що вбудоване
     });
 
     canvas.on('mouse:move', function(opt) {
+        const evt = opt.e;
+
+        // ЛОГІКА ДЛЯ ПЛАНШЕТА (Zoom двома пальцями)
+        if (isMultiTouch && evt.touches && evt.touches.length === 2) {
+            const currentDist = Math.hypot(
+                evt.touches[0].clientX - evt.touches[1].clientX,
+                evt.touches[0].clientY - evt.touches[1].clientY
+            );
+            
+            const delta = currentDist / lastTouchDist;
+            let zoom = canvas.getZoom() * delta;
+            if (zoom > 20) zoom = 20;
+            if (zoom < 0.1) zoom = 0.1;
+
+            const midX = (evt.touches[0].clientX + evt.touches[1].clientX) / 2;
+            const midY = (evt.touches[0].clientY + evt.touches[1].clientY) / 2;
+            
+            // Отримуємо локальні координати для зуму
+            const rect = wrapper.getBoundingClientRect();
+            const pointer = canvas.getPointer({ 
+                clientX: midX, 
+                clientY: midY 
+            });
+
+            canvas.zoomToPoint({ x: pointer.x, y: pointer.y }, zoom);
+            lastTouchDist = currentDist;
+            canvas.requestRenderAll();
+            return;
+        }
+
+        // ПАНІНГ (Мишка)
         if (isDragging) {
-            const e = opt.e;
             const vpt = this.viewportTransform;
-            vpt[4] += e.clientX - lastPosX;
-            vpt[5] += e.clientY - lastPosY;
+            vpt[4] += evt.clientX - lastPosX;
+            vpt[5] += evt.clientY - lastPosY;
             this.requestRenderAll();
-            lastPosX = e.clientX;
-            lastPosY = e.clientY;
+            lastPosX = evt.clientX;
+            lastPosY = evt.clientY;
         }
     });
 
     canvas.on('mouse:up', function() {
         isDragging = false;
+        isMultiTouch = false;
     });
 
-// 4. ЖЕСТИ ДЛЯ ПЛАНШЕТА (Zoom & Pan двома пальцями)
-canvas.on('touch:gesture', function(opt) {
-    if (opt.e.touches && opt.e.touches.length === 2) {
-        const point = new fabric.Point(opt.self.x, opt.self.y);
-        let zoom = canvas.getZoom() * opt.self.scale; // спробуй помножити напряму
-        
-        if (zoom > 20) zoom = 20;
-        if (zoom < 0.1) zoom = 0.1;
-        
-        canvas.zoomToPoint(point, zoom);
-        
-        if(opt.e.preventDefault) opt.e.preventDefault();
-        if(opt.e.stopPropagation) opt.e.stopPropagation();
-    }
-});
+    // 4. ДОДАТКОВЕ ПЕРЕСУВАННЯ ПАЛЬЦЕМ (якщо треба)
+    // Якщо хочеш рухати фото одним пальцем, треба додати логіку перевірки mode.
+    // Поки що залиш так — це має "оживити" зум щипком.
 
-canvas.on('touch:drag', function(opt) {
-    if (opt.e.touches && opt.e.touches.length === 2) {
-        const vpt = canvas.viewportTransform;
-        vpt[4] += opt.self.dx;
-        vpt[5] += opt.self.dy;
-        canvas.requestRenderAll();
-        
-        if(opt.e.preventDefault) opt.e.preventDefault();
-    }
-});
-
-    // СТАНДАРТНІ ОБРОБНИКИ (як і були)
     canvas.on('object:moving', (e) => { 
         if(e.target.owner) updateDimension(e.target.owner); 
     });
