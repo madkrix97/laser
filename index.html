@@ -46,7 +46,6 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
         <button id="clearCacheBtn" class="btn btn-dark" style="font-size:10px;">♻️ ОЧИСТИТИ ЛОКАЛЬНУ ПАМ'ЯТЬ</button>
         <button id="exportBtn" class="btn btn-green">📥 ЗАВАНТАЖИТИ JPG</button>
         <button id="delPhotoBtn" class="btn btn-red" style="margin-top: 5px;">🗑️ ВИДАЛИТИ ФОТО</button>
-        <button id="textModeBtn" class="btn">✏️ ТЕКСТ</button>
     </div>
     <div id="project-list"></div>
     <div id="status-bar">Система готова</div>
@@ -69,7 +68,6 @@ let canvas=null, tokenClient=null, accessToken=localStorage.getItem('at');
 let rootId=null, currentFolderId=null, currentPhotoId=null;
 let firstPoint=null;
 let isDrawingMode = false;
-let isTextMode = false; // Додаємо тільки цю нову змінну
 let photoCache={}, lineDataCache={};
 
 // --- СИСТЕМНІ ФУНКЦІЇ ---
@@ -163,47 +161,34 @@ function initCanvas(){
         backgroundColor: '#111'
     });
 
-    // 1. РЕДАГУВАННЯ ЧЕРЕЗ ПОДВІЙНИЙ КЛІК (найнадійніше)
+    // 1. РЕДАГУВАННЯ: Подвійний клік по будь-чому, що має owner
     canvas.on('mouse:dblclick', (opt) => {
-        if (opt.target && opt.target.type === 'text') {
-            const v = prompt("Введіть розмір:", opt.target.text);
+        if (opt.target && opt.target.owner) {
+            const targetText = opt.target.owner.text;
+            const v = prompt("Введіть розмір:", targetText.text);
             if (v !== null && v.trim() !== "") {
-                opt.target.set('text', v);
+                targetText.set('text', v);
                 canvas.renderAll();
                 saveToLocal();
             }
         }
     });
 
-    // 2. МАЛЮВАННЯ (на одинарний клік)
-canvas.on('mouse:down', (opt) => {
-    // ЯКЩО ВКЛЮЧЕНО РЕЖИМ ТЕКСТУ
-    if (isTextMode && opt.target) {
-        let targetText = (opt.target.type === 'text') ? opt.target : (opt.target.owner ? opt.target.owner.text : null);
-        
-        if (targetText) {
-            const v = prompt("Введіть розмір:", targetText.text);
-            if (v !== null) {
-                targetText.set('text', v);
-                canvas.renderAll();
-                saveToLocal();
-            }
-            return; // Виходимо, щоб нічого не рухати
-        }
-    }
+    // 2. МАЛЮВАННЯ: Одинарний клік
+    canvas.on('mouse:down', (opt) => {
+        if (opt.target) return; // Якщо влучили в точку/лінію — не малюємо нову
 
-    // ЯКЩО ВКЛЮЧЕНО РЕЖИМ МАЛЮВАННЯ
-    if (isDrawingMode && !opt.target) {
-        const pointer = canvas.getPointer(opt.e);
-        if (!firstPoint) {
-            firstPoint = { x: pointer.x, y: pointer.y };
-        } else {
-            createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
-            saveToLocal();
-            firstPoint = null;
+        if (isDrawingMode) {
+            const pointer = canvas.getPointer(opt.e);
+            if (!firstPoint) {
+                firstPoint = { x: pointer.x, y: pointer.y };
+            } else {
+                createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
+                saveToLocal();
+                firstPoint = null;
+            }
         }
-    }
-});
+    });
 
     canvas.on('object:moving', (e) => { 
         if(e.target.owner) updateDimension(e.target.owner); 
@@ -471,35 +456,6 @@ async function fetchPhoto(id){
 }
 
 // ---------------- BUTTONS ----------------
-// Кнопка малювання
-document.getElementById('drawModeBtn').onclick = () => {
-    isDrawingMode = !isDrawingMode;
-    isTextMode = false; // Вимикаємо текст, якщо вмикаємо малювання
-    updateButtonStyles();
-};
-
-// Кнопка тексту
-document.getElementById('textModeBtn').onclick = () => {
-    isTextMode = !isTextMode;
-    isDrawingMode = false; // Вимикаємо малювання, якщо вмикаємо текст
-    updateButtonStyles();
-};
-
-// Допоміжна функція для стилів (щоб не дублювати код)
-function updateButtonStyles() {
-    const dBtn = document.getElementById('drawModeBtn');
-    const tBtn = document.getElementById('textModeBtn');
-    
-    dBtn.style.background = isDrawingMode ? '#FF9500' : '#444';
-    tBtn.style.background = isTextMode ? '#007AFF' : '#444'; // Тексту дамо синій колір для контрасту
-    
-    if (isDrawingMode) setStatus("➕ Режим: Малювання ліній");
-    else if (isTextMode) setStatus("✏️ Режим: Введення значень");
-    else setStatus("👀 Режим: Перегляд");
-}
-
-
-    
 
 document.getElementById('exportBtn').onclick = exportCurrentPhoto;
 document.getElementById('delPhotoBtn').onclick = deleteCurrentPhoto;
