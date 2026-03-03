@@ -281,7 +281,7 @@ function updateDimension(owner) {
     const angle = Math.atan2(n2.top - n1.top, n2.left - n1.left);
     
     // Кут засічки (45 градусів до лінії)
-    const tickAngle = angle + (Math.PI / 4); 
+    const tickAngle = angle + (Math.PI / 2); 
 
     // Функція розрахунку координат засічки для точки p
     function setTickCoords(tick, p) {
