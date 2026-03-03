@@ -74,6 +74,19 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 <input type="file" id="fileInp" accept="image/*" multiple style="display:none">
 
 <script>
+
+// Додай це на самому початку файлу
+const magElem = document.createElement('div');
+magElem.id = 'magnifier';
+magElem.style.cssText = 'display:none; position:fixed; width:150px; height:150px; border-radius:50%; border:3px solid var(--orange); overflow:hidden; z-index:9999; pointer-events:none; box-shadow: 0 0 20px rgba(0,0,0,0.5); background:#111;';
+const magCanvas = document.createElement('canvas');
+magCanvas.width = 150; magCanvas.height = 150;
+magElem.appendChild(magCanvas);
+document.body.appendChild(magElem);
+const mCtx = magCanvas.getContext('2d');
+
+
+    
 const CLIENT_ID = '300326529737-03b44mmra75ht9o3dmgbb5n8c0maqm0q.apps.googleusercontent.com';
 const API_KEY = 'AIzaSyAYJo_Pcfot5LBrgm4IoakySM3XdGOxplo';
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
@@ -176,14 +189,17 @@ function initCanvas() {
         allowTouchScrolling: false,
     });
 
-    canvas.targetFindTolerance = 20; 
+    canvas.targetFindTolerance = 25; // Трохи збільшив для легшого підбору
     canvas.perPixelTargetFind = false;
 
     let isMultiTouch = false;
     let lastTouchDist = 0;
     let lastTouchMid = { x: 0, y: 0 };
+    
+    // Посилання на елементи лупи (ті, що ми створили вище)
+    const mag = document.getElementById('magnifier');
+    const mCanvas = mag.querySelector('canvas');
 
-    // --- ДОДАНО: ЗУМ МИШКОЮ (для ПК) ---
     canvas.on('mouse:wheel', function(opt) {
         const delta = opt.e.deltaY;
         let zoom = canvas.getZoom() * (0.999 ** delta);
@@ -197,11 +213,11 @@ function initCanvas() {
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
 
-        // 1. МУЛЬТИТАЧ (ЗУМ/ПАНІНГ)
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             firstPoint = null; 
             canvas.discardActiveObject();
+            mag.style.display = 'none'; // Ховаємо лупу при зумі
             
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
@@ -215,25 +231,25 @@ function initCanvas() {
             return;
         }
 
-        // 2. МАЛЮВАННЯ (тільки якщо isDrawingMode і натиснули на ПУСТЕ МІСЦЕ)
-        if (isDrawingMode && !isMultiTouch) {
-            // Якщо натиснули на точку (вузол) — дозволяємо Fabric почати перетягування
-            if (opt.target) return; 
+        // ПОКАЗУЄМО ЛУПУ при натисканні на вузол
+        if (opt.target && opt.target.role === 'node') {
+            mag.style.display = 'block';
+        }
 
+        if (isDrawingMode && !isMultiTouch) {
+            if (opt.target) return; 
             const pointer = canvas.getPointer(evt);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
             } else {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 firstPoint = null;
-                // Після створення знімаємо активність, щоб розблокувати зум
                 canvas.discardActiveObject();
                 canvas.requestRenderAll();
             }
-            return; // Виходимо, щоб не спрацювало редагування тексту одночасно
+            return;
         }
 
-        // 3. РЕДАГУВАННЯ ТЕКСТУ (коли режим малювання вимкнено)
         if (!isDrawingMode && opt.target && opt.target.type === 'text') {
             const t = opt.target;
             setTimeout(() => {
@@ -250,12 +266,41 @@ function initCanvas() {
     canvas.on('mouse:move', function(opt) {
         const evt = opt.e;
 
+        // ЛОГІКА ЛУПИ ПРИ РУСІ
+        if (opt.target && opt.target.role === 'node' && !isMultiTouch) {
+            const pointer = canvas.getPointer(evt);
+            const touch = evt.touches ? evt.touches[0] : evt;
+            
+            // Позиція віконця лупи (над пальцем)
+            mag.style.left = (touch.clientX - 75) + 'px';
+            mag.style.top = (touch.clientY - 160) + 'px'; // 160px вище точки дотику
+
+            // Малюємо вміст у лупу
+            const zoom = 2.5; // Наскільки сильно збільшуємо
+            const mCtx = mCanvas.getContext('2d');
+            mCtx.fillStyle = '#111';
+            mCtx.fillRect(0, 0, 150, 150);
+            mCtx.save();
+            mCtx.translate(75, 75);
+            mCtx.scale(zoom * canvas.getZoom(), zoom * canvas.getZoom());
+            mCtx.translate(-pointer.x, -pointer.y);
+            canvas.renderCanvas(mCtx, canvas.getObjects());
+            mCtx.restore();
+
+            // Малюємо перехрестя в центрі лупи
+            mCtx.strokeStyle = '#FF9500';
+            mCtx.lineWidth = 1;
+            mCtx.beginPath();
+            mCtx.moveTo(75, 65); mCtx.lineTo(75, 85);
+            mCtx.moveTo(65, 75); mCtx.lineTo(85, 75);
+            mCtx.stroke();
+        }
+
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
             const currentMid = {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
-            
             const vpt = canvas.viewportTransform;
             vpt[4] += currentMid.x - lastTouchMid.x;
             vpt[5] += currentMid.y - lastTouchMid.y;
@@ -265,21 +310,17 @@ function initCanvas() {
                 evt.touches[0].clientY - evt.touches[1].clientY
             );
             const zoomDelta = currentDist / lastTouchDist;
-            let newZoom = canvas.getZoom() * zoomDelta;
-            if (newZoom > 20) newZoom = 20;
-            if (newZoom < 0.05) newZoom = 0.05;
-
-            canvas.zoomToPoint({ x: currentMid.x, y: currentMid.y }, newZoom);
+            canvas.zoomToPoint({ x: currentMid.x, y: currentMid.y }, canvas.getZoom() * zoomDelta);
 
             lastTouchDist = currentDist;
             lastTouchMid = currentMid;
             canvas.requestRenderAll();
-            if (evt.cancelable) evt.preventDefault();
         }
     });
 
     canvas.on('mouse:up', () => {
         isMultiTouch = false;
+        mag.style.display = 'none'; // Ховаємо лупу
     });
 
     canvas.on('object:moving', (e) => {
