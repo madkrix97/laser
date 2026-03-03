@@ -172,24 +172,22 @@ function initCanvas() {
     canvas = new fabric.Canvas('c', {
         width: wrapper.clientWidth,
         height: wrapper.clientHeight,
-        selection: false,
+        selection: false, // вимикаємо групове виділення рамкою
         backgroundColor: '#111',
-        allowTouchScrolling: false
+        allowTouchScrolling: false,
+        stopContextMenu: true 
     });
 
-    // --- ЗМІННІ ДЛЯ ЗУМУ ТА ПАНІНГУ ---
     let isDragging = false;
     let lastPosX, lastPosY;
-    
     let isMultiTouch = false;
     let lastTouchDist = 0;
-    let lastTouchMid = { x: 0, y: 0 }; 
+    let lastTouchMid = { x: 0, y: 0 };
 
-    // 1. ZOOM (Мишка + Тачпад)
+    // ZOOM МИШКОЮ
     canvas.on('mouse:wheel', function(opt) {
         const delta = opt.e.deltaY;
-        let zoom = canvas.getZoom();
-        zoom *= 0.999 ** delta;
+        let zoom = canvas.getZoom() * (0.999 ** delta);
         if (zoom > 20) zoom = 20;
         if (zoom < 0.05) zoom = 0.05;
         canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
@@ -197,15 +195,16 @@ function initCanvas() {
         opt.e.stopPropagation();
     });
 
-    // 2. РЕДАГУВАННЯ: Подвійний клік (Додано затримку для стабільності на тач-екранах)
+    // РЕДАГУВАННЯ ТЕКСТУ (Double Tap / Click)
     canvas.on('mouse:dblclick', (opt) => {
-        if (opt.target && opt.target.owner) {
-            // Затримка допомагає мобільним браузерам коректно викликати вікно вводу
+        const target = opt.target;
+        // Перевіряємо, чи ми натиснули на текст або на будь-яку частину розміру
+        if (target && target.owner) {
             setTimeout(() => {
-                const targetText = opt.target.owner.text;
-                const v = prompt("Введіть розмір:", targetText.text);
+                const oldVal = target.owner.text.text;
+                const v = prompt("Введіть розмір:", oldVal);
                 if (v !== null && v.trim() !== "") {
-                    targetText.set('text', v);
+                    target.owner.text.set('text', v);
                     canvas.renderAll();
                     saveToLocal();
                 }
@@ -213,24 +212,21 @@ function initCanvas() {
         }
     });
 
-    // 3. ПАНІНГ ТА МАЛЮВАННЯ
+    // DOWN: Початок малювання або зуму
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
 
-        // ПЛАНШЕТ: Ініціалізація мультитачу (2 пальці)
+        // Якщо 2 пальці — це ЗАВЖДИ тільки зум/панінг
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             isDragging = false;
-            firstPoint = null; 
+            firstPoint = null;
+            canvas.discardActiveObject(); // Знімаємо виділення з усіх ліній
             
-            // Знімаємо виділення, щоб жести працювали по всьому полю
-            canvas.discardActiveObject();
-
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
                 evt.touches[0].clientY - evt.touches[1].clientY
             );
-            
             lastTouchMid = {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
@@ -239,59 +235,53 @@ function initCanvas() {
             return;
         }
 
-        // КОМП'ЮТЕР: Режим перетягування (Alt + мишка)
-        if (evt.altKey === true) {
+        // ПАНІНГ (Alt)
+        if (evt.altKey) {
             isDragging = true;
             lastPosX = evt.clientX;
             lastPosY = evt.clientY;
+            canvas.discardActiveObject();
             return;
         }
 
-        // ЛОГІКА МАЛЮВАННЯ
-        if (opt.target) return; // Не малюємо, якщо натиснули на існуючий об'єкт
-        
-        if (isDrawingMode && !isMultiTouch) {
-            const pointer = canvas.getPointer(opt.e);
+        // МАЛЮВАННЯ (тільки якщо один палець/клік і не на об'єкті)
+        if (isDrawingMode && !opt.target && !isMultiTouch) {
+            const pointer = canvas.getPointer(evt);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
             } else {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
-                saveToLocal();
                 firstPoint = null;
-                
-                // ВАЖЛИВО: Після створення лінії знімаємо з неї фокус, 
-                // щоб планшет не думав, що ми хочемо її рухати замість зуму
+                // ПІСЛЯ МАЛЮВАННЯ: знімаємо фокус і зберігаємо
                 canvas.discardActiveObject();
-                canvas.requestRenderAll();
+                canvas.renderAll();
+                saveToLocal();
             }
         }
     });
 
+    // MOVE: Рух
     canvas.on('mouse:move', function(opt) {
         const evt = opt.e;
 
-        // ПЛАНШЕТ: Комбінований Zoom + Pan (2 пальці)
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
             const currentMid = {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
             
-            const deltaX = currentMid.x - lastTouchMid.x;
-            const deltaY = currentMid.y - lastTouchMid.y;
-
+            // Pan
             const vpt = canvas.viewportTransform;
-            vpt[4] += deltaX;
-            vpt[5] += deltaY;
+            vpt[4] += currentMid.x - lastTouchMid.x;
+            vpt[5] += currentMid.y - lastTouchMid.y;
 
+            // Zoom
             const currentDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
                 evt.touches[0].clientY - evt.touches[1].clientY
             );
-
             const zoomDelta = currentDist / lastTouchDist;
             let newZoom = canvas.getZoom() * zoomDelta;
-
             if (newZoom > 20) newZoom = 20;
             if (newZoom < 0.05) newZoom = 0.05;
 
@@ -300,30 +290,26 @@ function initCanvas() {
 
             lastTouchDist = currentDist;
             lastTouchMid = currentMid;
-
             canvas.requestRenderAll();
-            
-            if (evt.cancelable) evt.preventDefault(); 
+            if (evt.cancelable) evt.preventDefault();
             return;
         }
 
-        // КОМП'ЮТЕР: Панінг (Мишка)
         if (isDragging) {
             const vpt = this.viewportTransform;
             vpt[4] += evt.clientX - lastPosX;
             vpt[5] += evt.clientY - lastPosY;
-            this.requestRenderAll();
             lastPosX = evt.clientX;
             lastPosY = evt.clientY;
+            this.requestRenderAll();
         }
     });
 
-    canvas.on('mouse:up', function() {
+    canvas.on('mouse:up', () => {
         isDragging = false;
         isMultiTouch = false;
     });
 
-    // ОНОВЛЕННЯ РОЗМІРІВ ПРИ РУСІ
     canvas.on('object:moving', (e) => {
         if (e.target.owner) updateDimension(e.target.owner);
     });
@@ -331,115 +317,107 @@ function initCanvas() {
     canvas.on('object:modified', saveToLocal);
 }
 
-
 function createDimension(p1, p2, val = "0.000") {
-    // 1. ТЕХНІЧНІ ТОЧКИ (Прозорі, але великі для дотику)
-const nodeProps = {
-    radius: 15,            // Область залишається великою для зручності
-    fill: 'rgba(0,0,0,0)', // Повністю прозоре залиття
-    stroke: 'rgba(0,0,0,0)', // Повністю прозорий контур
-    originX: 'center', 
-    originY: 'center',
-    hasControls: false,    // Прибираємо квадратики керування
-    hasBorders: false,     // Прибираємо синю рамку навколо при кліку
-    selectable: true, 
-    evented: true, 
-    role: 'node',
-    hoverCursor: 'move'    // Змінюємо курсор на "руку" при наведенні, щоб ти знав, де хапати
-};
+    const nodeProps = {
+        radius: 15,
+        fill: 'rgba(0,0,0,0)', 
+        stroke: 'rgba(0,0,0,0)',
+        originX: 'center', 
+        originY: 'center',
+        hasControls: false,
+        hasBorders: false,
+        selectable: true,
+        evented: true,
+        hoverCursor: 'move'
+    };
 
     const n1 = new fabric.Circle({ ...nodeProps, left: p1.x, top: p1.y });
     const n2 = new fabric.Circle({ ...nodeProps, left: p2.x, top: p2.y });
     
-    // 2. ОСНОВНА ЛІНІЯ (Дуже тонка)
     const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
         stroke: '#FF9500', 
-        strokeWidth: 1,      // Ювелірна товщина
-        selectable: false, 
-        evented: true,
-        role: 'line'
+        strokeWidth: 1,
+        selectable: false,
+        evented: true
     });
 
-    // 3. ВІЗУАЛЬНІ ЗАСІЧКИ (Нові лінії)
     const tickProps = {
         stroke: '#FF9500',
-        strokeWidth: 2,       // Засічка трохи товстіша за лінію
+        strokeWidth: 2,
         selectable: false,
-        evented: false,       // Засічки - просто картинка
-        strokeLineCap: 'round' // Скруглені краї
+        evented: false, // засічки не заважають клікам
+        strokeLineCap: 'round'
     };
 
-    // Створюємо дві засічки. Їх координати ми оновимо в updateDimension
     const tick1 = new fabric.Line([0,0,0,0], tickProps);
     const tick2 = new fabric.Line([0,0,0,0], tickProps);
 
-    // 4. ТЕКСТ (Акуратний та маленький)
     const text = new fabric.Text(val, {
-        fontSize: 12,
+        fontSize: 14, // трохи більше для планшета
         fill: 'white',
-        backgroundColor: 'rgba(0,0,0,0.6)', 
-        originX: 'center', originY: 'center',
-        hasControls: false, selectable: true, evented: true,
-        padding: 3, fontStyle: 'italic'
+        backgroundColor: 'rgba(0,0,0,0.7)', 
+        originX: 'center', 
+        originY: 'center',
+        hasControls: false, 
+        selectable: true, 
+        evented: true,
+        padding: 5,
+        fontFamily: 'monospace' // краще для цифр
     });
 
-    // Оновлений owner з усіма частинами
+    // ЗВ'ЯЗКА: тепер абсолютно всі елементи знають, хто їх власник
     const owner = { n1, n2, line, text, tick1, tick2 };
-    n1.owner = n2.owner = text.owner = line.owner = owner;
+    n1.owner = n2.owner = text.owner = line.owner = tick1.owner = tick2.owner = owner;
 
-    // Додаємо все на канвас
-    canvas.add(line, text, tick1, tick2, n1, n2); // Технічні точки n1, n2 додаємо ОСТАННІМИ, щоб вони були зверху
+    // ВАЖЛИВО: порядок додавання визначає шар. 
+    // Засічки і лінія знизу, текст вище, прозорі вузли n1, n2 — зверху.
+    canvas.add(line, tick1, tick2, text, n1, n2);
     
-    // ПРИМУСОВО виводимо текст та засічки на передній план, але ПІД прозорі точки
-    tick1.bringToFront();
-    tick2.bringToFront();
-    text.bringToFront(); 
-    
+    // Оновлюємо координати (засічки, текст) ДО рендеру
     updateDimension(owner);
-    canvas.renderAll();
+    
+    canvas.requestRenderAll();
+    saveToLocal(); // Зберігаємо відразу
 }
+    
 
 function updateDimension(owner) {
+    if (!owner) return;
     const { n1, n2, line, text, tick1, tick2 } = owner;
     
-    // 1. Оновлюємо основну лінію
+    // Оновлюємо основну лінію
     line.set({ x1: n1.left, y1: n1.top, x2: n2.left, y2: n2.top });
 
-    // 2. Оновлюємо текст (по центру)
+    // Центр для тексту
     const midX = (n1.left + n2.left) / 2;
     const midY = (n1.top + n2.top) / 2;
     text.set({ left: midX, top: midY });
 
-    // 3. ОНОВЛЮЄМО ЗАСІЧКИ (Розрахунок геометрії)
-    
-    // Довжина засічки (візуальна)
-    const tickLength = 10; 
-    
-    // Кут нахилу основної лінії
+    // ГЕОМЕТРІЯ ЗАСІЧОК
+    const tickLength = 12; // трохи довші для видимості
     const angle = Math.atan2(n2.top - n1.top, n2.left - n1.left);
-    
-    // Кут засічки (45 градусів до лінії)
-    const tickAngle = angle + (Math.PI / 2); 
+    const tickAngle = angle + (Math.PI / 4); // 45 градусів виглядає професійніше
 
-    // Функція розрахунку координат засічки для точки p
-    function setTickCoords(tick, p) {
-        // Розраховуємо зміщення кінців засічки від центральної точки p
+    function setTick(tick, node) {
         const dx = Math.cos(tickAngle) * (tickLength / 2);
         const dy = Math.sin(tickAngle) * (tickLength / 2);
         
         tick.set({
-            x1: p.left - dx,
-            y1: p.top - dy,
-            x2: p.left + dx,
-            y2: p.top + dy
+            x1: node.left - dx,
+            y1: node.top - dy,
+            x2: node.left + dx,
+            y2: node.top + dy
         });
+        tick.setCoords(); // Важливо для Fabric
     }
 
-    // Оновлюємо обидві засічки
-    setTickCoords(tick1, n1);
-    setTickCoords(tick2, n2);
+    setTick(tick1, n1);
+    setTick(tick2, n2);
 
-    canvas.renderAll();
+    // Оновлюємо координати всіх взаємодіючих елементів
+    n1.setCoords();
+    n2.setCoords();
+    text.setCoords();
 }
 
 async function downloadProjectData(folderId) {
