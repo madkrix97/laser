@@ -53,10 +53,14 @@ body {margin:0; font-family:-apple-system,sans-serif; background:#000; color:whi
 </head>
 <body>
 <div id="header">
-    <div style="display:flex; gap:10px;">
-        <button id="drawModeBtn" class="btn-round btn-orange" title="Малювати">➕</button>
-        <button id="delObjBtn" class="btn-round btn-red" title="Видалити лінію">🗑️</button>
-    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+            <button id="authBtn" class="btn-round" style="background:#3a3a3c;" title="Вхід у Drive">🔑</button>
+            
+            <div style="width:1px; height:25px; background:#444; margin:0 5px;"></div>
+    
+            <button id="drawModeBtn" class="btn-round btn-orange" title="Малювати">➕</button>
+            <button id="delObjBtn" class="btn-round btn-red" title="Видалити лінію">🗑️</button>
+        </div>
 
     <div style="position: relative;">
         <button id="project-dropdown">📁 Виберіть об'єкт <small>▼</small></button>
@@ -602,19 +606,36 @@ async function deleteCurrentPhoto() {
 
 async function startApp(){
     if(!gapi.client) { 
-        console.warn("GAPI не готовий, чекаємо..."); 
         setTimeout(startApp, 500); 
         return; 
     }
     gapi.client.setToken({access_token:accessToken});
-    updateNetStatus("online");
+    
+    // Оновлюємо вигляд кнопки, якщо ми залогінені
+    const authBtn = document.getElementById('authBtn');
+    if (accessToken) {
+        authBtn.style.background = "var(--green)";
+        authBtn.innerText = "👤";
+    }
+
     initCanvas();
     
     try {
-        const res=await gapi.client.drive.files.list({q:"name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"});
-        rootId=res.result.files.length?res.result.files[0].id:(await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
-        loadProjects();
-    } catch(e) { setStatus("❌ Помилка авторизації"); }
+        const res = await gapi.client.drive.files.list({
+            q: "name='LaserApp' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        });
+        
+        if (res.result.files) {
+            rootId = res.result.files.length ? res.result.files[0].id : (await gapi.client.drive.files.create({resource:{name:'LaserApp',mimeType:'application/vnd.google-apps.folder'}})).result.id;
+            loadProjects();
+            setStatus("Система готова");
+        }
+    } catch(e) { 
+        console.error(e);
+        setStatus("❌ Потрібна авторизація");
+        authBtn.style.background = "var(--red)";
+        authBtn.innerText = "🔑";
+    }
 }
 
 function gapiLoaded(){ 
@@ -817,5 +838,14 @@ window.onload=()=>{
     const saved = localStorage.getItem('laser_offline_cache'); if(saved) lineDataCache=JSON.parse(saved);
 };
 </script>
+<div id="net-status" style="display:none;">
+    <div class="dot"></div>
+    <div class="text"></div>
+</div>
+
+<div id="photo-strip" style="display:none;">
+    <button id="delPhotoBtn" class="btn-round btn-red" style="position:fixed; left:10px; bottom:10px; z-index:100;">🗑️ Фото</button>
+</div>
+    
 </body>
 </html>
