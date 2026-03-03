@@ -199,47 +199,108 @@ function initCanvas(){
 
 
 function createDimension(p1, p2, val = "0.000") {
-    const props = {
-        radius: 12, fill: 'rgba(255,149,0,0.8)',
+    // 1. ТЕХНІЧНІ ТОЧКИ (Прозорі, але великі для дотику)
+    const nodeProps = {
+        radius: 15,          // Велика зона для пальця
+        fill: 'rgba(0,0,0,0)', // ПОВНІСТЮ ПРОЗОРА
+        stroke: 'rgba(255,149,0,0.3)', // Тонкий напівпрозорий контур (щоб бачити, де вузол)
+        strokeWidth: 1,
         originX: 'center', originY: 'center',
         hasControls: false, hasBorders: false,
         selectable: true, evented: true, role: 'node'
     };
 
-    const n1 = new fabric.Circle({ ...props, left: p1.x, top: p1.y });
-    const n2 = new fabric.Circle({ ...props, left: p2.x, top: p2.y });
+    const n1 = new fabric.Circle({ ...nodeProps, left: p1.x, top: p1.y });
+    const n2 = new fabric.Circle({ ...nodeProps, left: p2.x, top: p2.y });
     
+    // 2. ОСНОВНА ЛІНІЯ (Дуже тонка)
     const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
-        stroke: '#FF9500', strokeWidth: 3,
-        selectable: false, evented: false
+        stroke: '#FF9500', 
+        strokeWidth: 1,      // Ювелірна товщина
+        selectable: false, 
+        evented: true,
+        role: 'line'
     });
 
-const text = new fabric.Text(val, {
-    fontSize: 22,
-    fill: 'white',
-    backgroundColor: 'black',
-    originX: 'center',
-    originY: 'center',
-    hasControls: false,
-    selectable: true, // ВАЖЛИВО: має бути true для реєстрації dblclick
-    evented: true,
-    padding: 20,
-    lockMovementX: true,
-    lockMovementY: true
-});
+    // 3. ВІЗУАЛЬНІ ЗАСІЧКИ (Нові лінії)
+    const tickProps = {
+        stroke: '#FF9500',
+        strokeWidth: 2,       // Засічка трохи товстіша за лінію
+        selectable: false,
+        evented: false,       // Засічки - просто картинка
+        strokeLineCap: 'round' // Скруглені краї
+    };
 
-    const owner = { n1, n2, line, text };
-    n1.owner = n2.owner = text.owner = owner;
+    // Створюємо дві засічки. Їх координати ми оновимо в updateDimension
+    const tick1 = new fabric.Line([0,0,0,0], tickProps);
+    const tick2 = new fabric.Line([0,0,0,0], tickProps);
 
-    canvas.add(line, text, n1, n2);
-    text.bringToFront();
+    // 4. ТЕКСТ (Акуратний та маленький)
+    const text = new fabric.Text(val, {
+        fontSize: 12,
+        fill: 'white',
+        backgroundColor: 'rgba(0,0,0,0.6)', 
+        originX: 'center', originY: 'center',
+        hasControls: false, selectable: true, evented: true,
+        padding: 3, fontStyle: 'italic'
+    });
+
+    // Оновлений owner з усіма частинами
+    const owner = { n1, n2, line, text, tick1, tick2 };
+    n1.owner = n2.owner = text.owner = line.owner = owner;
+
+    // Додаємо все на канвас
+    canvas.add(line, text, tick1, tick2, n1, n2); // Технічні точки n1, n2 додаємо ОСТАННІМИ, щоб вони були зверху
+    
+    // ПРИМУСОВО виводимо текст та засічки на передній план, але ПІД прозорі точки
+    tick1.bringToFront();
+    tick2.bringToFront();
+    text.bringToFront(); 
+    
     updateDimension(owner);
-    canvas.renderAll(); // Примусово оновлюємо вигляд
+    canvas.renderAll();
 }
 
-function updateDimension(o){
-    o.line.set({x1:o.n1.left, y1:o.n1.top, x2:o.n2.left, y2:o.n2.top});
-    o.text.set({left:(o.n1.left+o.n2.left)/2, top:(o.n1.top+o.n2.top)/2});
+function updateDimension(owner) {
+    const { n1, n2, line, text, tick1, tick2 } = owner;
+    
+    // 1. Оновлюємо основну лінію
+    line.set({ x1: n1.left, y1: n1.top, x2: n2.left, y2: n2.top });
+
+    // 2. Оновлюємо текст (по центру)
+    const midX = (n1.left + n2.left) / 2;
+    const midY = (n1.top + n2.top) / 2;
+    text.set({ left: midX, top: midY });
+
+    // 3. ОНОВЛЮЄМО ЗАСІЧКИ (Розрахунок геометрії)
+    
+    // Довжина засічки (візуальна)
+    const tickLength = 10; 
+    
+    // Кут нахилу основної лінії
+    const angle = Math.atan2(n2.top - n1.top, n2.left - n1.left);
+    
+    // Кут засічки (45 градусів до лінії)
+    const tickAngle = angle + (Math.PI / 4); 
+
+    // Функція розрахунку координат засічки для точки p
+    function setTickCoords(tick, p) {
+        // Розраховуємо зміщення кінців засічки від центральної точки p
+        const dx = Math.cos(tickAngle) * (tickLength / 2);
+        const dy = Math.sin(tickAngle) * (tickLength / 2);
+        
+        tick.set({
+            x1: p.left - dx,
+            y1: p.top - dy,
+            x2: p.left + dx,
+            y2: p.top + dy
+        });
+    }
+
+    // Оновлюємо обидві засічки
+    setTickCoords(tick1, n1);
+    setTickCoords(tick2, n2);
+
     canvas.renderAll();
 }
 
