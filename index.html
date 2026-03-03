@@ -164,14 +164,14 @@ async function syncAll() {
 }
 
 // ---------------- CANVAS LOGIC ----------------
-function initCanvas(){
+function initCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
-    if(canvas) canvas.dispose();
-    
+    if (canvas) canvas.dispose();
+
     canvas = new fabric.Canvas('c', {
-        width: wrapper.clientWidth, 
-        height: wrapper.clientHeight, 
-        selection: false, 
+        width: wrapper.clientWidth,
+        height: wrapper.clientHeight,
+        selection: false,
         backgroundColor: '#111',
         allowTouchScrolling: false
     });
@@ -179,8 +179,10 @@ function initCanvas(){
     // --- ЗМІННІ ДЛЯ ЗУМУ ТА ПАНІНГУ ---
     let isDragging = false;
     let lastPosX, lastPosY;
-    let lastTouchDist = 0; // Для зуму на планшеті
+    
     let isMultiTouch = false;
+    let lastTouchDist = 0;
+    let lastTouchMid = { x: 0, y: 0 }; // Для відстеження руху центру щипка
 
     // 1. ZOOM (Мишка + Тачпад)
     canvas.on('mouse:wheel', function(opt) {
@@ -188,7 +190,7 @@ function initCanvas(){
         let zoom = canvas.getZoom();
         zoom *= 0.999 ** delta;
         if (zoom > 20) zoom = 20;
-        if (zoom < 0.1) zoom = 0.1;
+        if (zoom < 0.05) zoom = 0.05;
         canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
         opt.e.preventDefault();
         opt.e.stopPropagation();
@@ -210,29 +212,35 @@ function initCanvas(){
     // 3. ПАНІНГ ТА МАЛЮВАННЯ
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
-        
-        // Перевірка на мультитач (планшет)
+
+        // ПЛАНШЕТ: Ініціалізація мультитачу (2 пальці)
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             isDragging = false;
             firstPoint = null; // Скасовуємо малювання лінії
+
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
                 evt.touches[0].clientY - evt.touches[1].clientY
             );
+            
+            lastTouchMid = {
+                x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
+                y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
+            };
             return;
         }
 
-        // Режим перетягування (Alt + мишка)
+        // КОМП'ЮТЕР: Режим перетягування (Alt + мишка)
         if (evt.altKey === true) {
             isDragging = true;
             lastPosX = evt.clientX;
             lastPosY = evt.clientY;
-            return; 
+            return;
         }
 
-        // Логіка малювання
-        if (opt.target) return; 
+        // ЛОГІКА МАЛЮВАННЯ
+        if (opt.target) return;
         if (isDrawingMode && !isMultiTouch) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
@@ -248,35 +256,49 @@ function initCanvas(){
     canvas.on('mouse:move', function(opt) {
         const evt = opt.e;
 
-        // ЛОГІКА ДЛЯ ПЛАНШЕТА (Zoom двома пальцями)
+        // ПЛАНШЕТ: Комбінований Zoom + Pan (2 пальці)
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
+            // 1. Розраховуємо новий центр та зміщення (Pan)
+            const currentMid = {
+                x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
+                y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
+            };
+            
+            const deltaX = currentMid.x - lastTouchMid.x;
+            const deltaY = currentMid.y - lastTouchMid.y;
+
+            // Рухаємо канвас слідом за центром пальців
+            const vpt = canvas.viewportTransform;
+            vpt[4] += deltaX;
+            vpt[5] += deltaY;
+
+            // 2. Розраховуємо зміну масштабу (Zoom)
             const currentDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
                 evt.touches[0].clientY - evt.touches[1].clientY
             );
-            
-            const delta = currentDist / lastTouchDist;
-            let zoom = canvas.getZoom() * delta;
-            if (zoom > 20) zoom = 20;
-            if (zoom < 0.1) zoom = 0.1;
 
-            const midX = (evt.touches[0].clientX + evt.touches[1].clientX) / 2;
-            const midY = (evt.touches[0].clientY + evt.touches[1].clientY) / 2;
-            
-            // Отримуємо локальні координати для зуму
-            const rect = wrapper.getBoundingClientRect();
-            const pointer = canvas.getPointer({ 
-                clientX: midX, 
-                clientY: midY 
-            });
+            const zoomDelta = currentDist / lastTouchDist;
+            let newZoom = canvas.getZoom() * zoomDelta;
 
-            canvas.zoomToPoint({ x: pointer.x, y: pointer.y }, zoom);
+            if (newZoom > 20) newZoom = 20;
+            if (newZoom < 0.05) newZoom = 0.05;
+
+            // Робимо зум відносно поточного центру пальців
+            const pointer = canvas.getPointer({ clientX: currentMid.x, clientY: currentMid.y });
+            canvas.zoomToPoint({ x: pointer.x, y: pointer.y }, newZoom);
+
+            // Оновлюємо значення для наступного кадру
             lastTouchDist = currentDist;
+            lastTouchMid = currentMid;
+
             canvas.requestRenderAll();
+            
+            if (evt.cancelable) evt.preventDefault(); // Блокуємо скрол сторінки
             return;
         }
 
-        // ПАНІНГ (Мишка)
+        // КОМП'ЮТЕР: Панінг (Мишка)
         if (isDragging) {
             const vpt = this.viewportTransform;
             vpt[4] += evt.clientX - lastPosX;
@@ -292,12 +314,9 @@ function initCanvas(){
         isMultiTouch = false;
     });
 
-    // 4. ДОДАТКОВЕ ПЕРЕСУВАННЯ ПАЛЬЦЕМ (якщо треба)
-    // Якщо хочеш рухати фото одним пальцем, треба додати логіку перевірки mode.
-    // Поки що залиш так — це має "оживити" зум щипком.
-
-    canvas.on('object:moving', (e) => { 
-        if(e.target.owner) updateDimension(e.target.owner); 
+    // ОНОВЛЕННЯ РОЗМІРІВ ПРИ РУСІ
+    canvas.on('object:moving', (e) => {
+        if (e.target.owner) updateDimension(e.target.owner);
     });
 
     canvas.on('object:modified', saveToLocal);
