@@ -173,25 +173,35 @@ function initCanvas() {
         height: wrapper.clientHeight,
         selection: false,
         backgroundColor: '#111',
-        allowTouchScrolling: false, // Важливо для стабільності зуму
+        allowTouchScrolling: false,
     });
 
-    // Налаштування для тач-екранів
-    canvas.targetFindTolerance = 15;
-    canvas.perPixelTargetFind = false; // Повертаємо false, щоб легше було "схопити" прозору точку
+    canvas.targetFindTolerance = 20; 
+    canvas.perPixelTargetFind = false;
 
     let isMultiTouch = false;
     let lastTouchDist = 0;
     let lastTouchMid = { x: 0, y: 0 };
 
+    // --- ДОДАНО: ЗУМ МИШКОЮ (для ПК) ---
+    canvas.on('mouse:wheel', function(opt) {
+        const delta = opt.e.deltaY;
+        let zoom = canvas.getZoom() * (0.999 ** delta);
+        if (zoom > 20) zoom = 20;
+        if (zoom < 0.05) zoom = 0.05;
+        canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+        opt.e.preventDefault();
+        opt.e.stopPropagation();
+    });
+
     canvas.on('mouse:down', function(opt) {
         const evt = opt.e;
 
-        // ЯКЩО ДВА ПАЛЬЦІ - МИТТЄВО ВИМИКАЄМО ВСЕ РЕДАГУВАННЯ
+        // 1. МУЛЬТИТАЧ (ЗУМ/ПАНІНГ)
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
-            canvas.discardActiveObject(); // Знімаємо виділення, щоб розблокувати зум
-            canvas.requestRenderAll();
+            firstPoint = null; 
+            canvas.discardActiveObject();
             
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
@@ -201,47 +211,55 @@ function initCanvas() {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
+            canvas.requestRenderAll();
             return;
         }
 
-        // РЕДАГУВАННЯ ТЕКСТУ ПРИ ТАПІ (коли не малюємо)
-        if (!isDrawingMode && opt.target && opt.target.type === 'text') {
-            const t = opt.target;
-            setTimeout(() => {
-                const v = prompt("Введіть розмір:", t.text);
-                if (v) { t.set('text', v); canvas.renderAll(); saveToLocal(); }
-            }, 100);
-            return;
-        }
+        // 2. МАЛЮВАННЯ (тільки якщо isDrawingMode і натиснули на ПУСТЕ МІСЦЕ)
+        if (isDrawingMode && !isMultiTouch) {
+            // Якщо натиснули на точку (вузол) — дозволяємо Fabric почати перетягування
+            if (opt.target) return; 
 
-        // МАЛЮВАННЯ (тільки якщо тиснемо на порожнє місце)
-        if (isDrawingMode && !opt.target && !isMultiTouch) {
             const pointer = canvas.getPointer(evt);
             if (!firstPoint) {
                 firstPoint = { x: pointer.x, y: pointer.y };
             } else {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 firstPoint = null;
+                // Після створення знімаємо активність, щоб розблокувати зум
+                canvas.discardActiveObject();
+                canvas.requestRenderAll();
             }
+            return; // Виходимо, щоб не спрацювало редагування тексту одночасно
+        }
+
+        // 3. РЕДАГУВАННЯ ТЕКСТУ (коли режим малювання вимкнено)
+        if (!isDrawingMode && opt.target && opt.target.type === 'text') {
+            const t = opt.target;
+            setTimeout(() => {
+                const v = prompt("Введіть розмір:", t.text);
+                if (v !== null && v.trim() !== "") {
+                    t.set('text', v);
+                    canvas.renderAll();
+                    saveToLocal();
+                }
+            }, 100);
         }
     });
 
     canvas.on('mouse:move', function(opt) {
         const evt = opt.e;
 
-        // ЗУМ І ПАНІНГ (тільки при мультитачі)
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
             const currentMid = {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
             
-            // Рух (Panning)
             const vpt = canvas.viewportTransform;
             vpt[4] += currentMid.x - lastTouchMid.x;
             vpt[5] += currentMid.y - lastTouchMid.y;
 
-            // Масштаб (Zooming)
             const currentDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
                 evt.touches[0].clientY - evt.touches[1].clientY
@@ -267,8 +285,9 @@ function initCanvas() {
     canvas.on('object:moving', (e) => {
         if (e.target.owner) updateDimension(e.target.owner);
     });
-}
 
+    canvas.on('object:modified', saveToLocal);
+}
     
 // Допоміжна функція для виклику prompt
 function openTextEditor(textObj) {
@@ -591,16 +610,20 @@ document.getElementById('authBtn').onclick=()=>tokenClient?.requestAccessToken()
 document.getElementById('syncBtn').onclick=syncAll;
 document.getElementById('clearCacheBtn').onclick=()=>{ if(confirm("Очистити локальні дані?")){ localStorage.removeItem('laser_offline_cache'); lineDataCache={}; location.reload(); }};
 
-document.getElementById('drawModeBtn').onclick=function(){
-    isDrawingMode=!isDrawingMode; this.style.background=isDrawingMode? "var(--green)":"var(--orange)";
-    if(isDrawingMode){
-        canvas.on('mouse:down', (opt)=>{
-            if(!isDrawingMode || opt.e.altKey) return;
-            const pointer=canvas.getPointer(opt.e);
-            if(!firstPoint) firstPoint={x:pointer.x, y:pointer.y};
-            else { createDimension(firstPoint, {x:pointer.x, y:pointer.y}, "0.000"); saveToLocal(); firstPoint=null; }
-        });
-    } else { canvas.off('mouse:down'); firstPoint=null; }
+document.getElementById('drawModeBtn').onclick = function() {
+    isDrawingMode = !isDrawingMode;
+    
+    // Візуальна індикація
+    this.style.background = isDrawingMode ? "var(--green)" : "var(--orange)";
+    
+    // Скидаємо незавершену лінію при перемиканні режиму
+    firstPoint = null;
+    
+    // Знімаємо виділення, щоб можна було відразу зумити
+    if (canvas) {
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+    }
 };
 
 document.getElementById('delObjBtn').onclick = () => {
