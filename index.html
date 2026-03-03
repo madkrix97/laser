@@ -174,14 +174,18 @@ async function syncAll() {
 function initCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
     if (canvas) canvas.dispose();
+    
     canvas = new fabric.Canvas('c', { 
         width: wrapper.clientWidth, 
         height: wrapper.clientHeight, 
         selection: false, 
-        backgroundColor: '#111' 
+        backgroundColor: '#111',
+        // Оптимізація для плавності
+        renderOnAddRemove: false,
+        statefullCache: true
     });
 
-    // Важливо для швидкодії на планшетах
+    // Вимикаємо важке масштабування для Retina (планшет скаже "дякую")
     canvas.enableRetinaScaling = false;
 
     let isMultiTouch = false, lastTouchDist = 0, lastTouchMid = { x: 0, y: 0 };
@@ -216,6 +220,8 @@ function initCanvas() {
             lastTouchDist = Math.hypot(evt.touches[0].clientX - evt.touches[1].clientX, evt.touches[0].clientY - evt.touches[1].clientY);
             lastTouchMid = { x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2, y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2 };
             mag.style.display = 'none';
+            // Вимикаємо пошук об'єктів під час зуму
+            canvas.skipTargetFind = true;
             return;
         }
 
@@ -236,7 +242,6 @@ function initCanvas() {
     canvas.on('mouse:move', (opt) => {
         const evt = opt.e;
         
-        // Панорамування та зум
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             const touch1 = evt.touches[0];
@@ -245,11 +250,13 @@ function initCanvas() {
             const currentMid = { x: (touch1.clientX + touch2.clientX) / 2, y: (touch1.clientY + touch2.clientY) / 2 };
 
             if (lastTouchDist > 0) {
-                // Зум
-                const zoom = canvas.getZoom() * (currentDist / lastTouchDist);
+                // Зум з лімітами (щоб не втратити картинку)
+                let zoom = canvas.getZoom() * (currentDist / lastTouchDist);
+                if (zoom > 15) zoom = 15;
+                if (zoom < 0.05) zoom = 0.05;
                 canvas.zoomToPoint({ x: currentMid.x, y: currentMid.y }, zoom);
                 
-                // Переміщення (Pan)
+                // Плавне переміщення через relativePan
                 const dx = currentMid.x - lastTouchMid.x;
                 const dy = currentMid.y - lastTouchMid.y;
                 canvas.relativePan(new fabric.Point(dx, dy));
@@ -257,7 +264,7 @@ function initCanvas() {
 
             lastTouchDist = currentDist;
             lastTouchMid = currentMid;
-            canvas.requestRenderAll();
+            canvas.requestRenderAll(); // Оптимізований рендер
             return;
         }
 
@@ -268,8 +275,10 @@ function initCanvas() {
 
     canvas.on('mouse:up', () => { 
         isMultiTouch = false; 
-        lastTouchDist = 0; // Скидаємо дистанцію для плавності
+        lastTouchDist = 0;
+        canvas.skipTargetFind = false; // Знову дозволяємо клікати по об'єктах
         mag.style.display = 'none'; 
+        canvas.requestRenderAll();
     });
 
     canvas.on('object:moving', (e) => { if (e.target.owner) updateDimension(e.target.owner); });
