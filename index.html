@@ -303,8 +303,8 @@ function openTextEditor(textObj) {
 
 function createDimension(p1, p2, val = "0.000") {
     const nodeProps = {
-        radius: 25, // Збільшено для легкого захвату пальцем
-        fill: 'rgba(255,149,0,0.1)', 
+        radius: 22, // Достатньо для пальця
+        fill: 'rgba(255, 149, 0, 0.03)', // Майже прозорий фон
         stroke: 'transparent',
         originX: 'center', 
         originY: 'center',
@@ -320,35 +320,46 @@ function createDimension(p1, p2, val = "0.000") {
     
     const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
         stroke: '#FF9500', 
-        strokeWidth: 2,
+        strokeWidth: 1.2, // Тонка акуратна лінія
         selectable: false,
-        evented: false // Лінія не заважає
+        evented: false
     });
 
     const text = new fabric.Text(val, {
-        fontSize: 16,
-        fill: 'white',
-        backgroundColor: 'rgba(0,0,0,0.8)', 
-        originX: 'center', originY: 'center',
+        fontSize: 13, // Компактний шрифт
+        fill: '#FF9500', // Колір тексту як у ліній
+        fontFamily: 'monospace',
+        backgroundColor: 'rgba(17, 17, 17, 0.9)', // Темний фон під текстом
+        originX: 'center', 
+        originY: 'center',
         hasControls: false,
         hasBorders: false,
         selectable: true, 
         evented: true,
-        padding: 5
+        padding: 4,
+        rx: 4, ry: 4 // Заокруглення фону тексту (якщо Fabric версії 4+)
     });
 
-    const tickProps = { stroke: '#FF9500', strokeWidth: 2, selectable: false, evented: false };
+    // Стиль засічок
+    const tickProps = { 
+        stroke: '#FF9500', 
+        strokeWidth: 1.5, 
+        selectable: false, 
+        evented: false,
+        strokeLineCap: 'round' 
+    };
     const tick1 = new fabric.Line([0,0,0,0], tickProps);
     const tick2 = new fabric.Line([0,0,0,0], tickProps);
 
     const owner = { n1, n2, line, text, tick1, tick2 };
     n1.owner = n2.owner = text.owner = line.owner = tick1.owner = tick2.owner = owner;
 
+    // Важливо: засічки і лінія під текстом і вузлами
     canvas.add(line, tick1, tick2, text, n1, n2);
     updateDimension(owner);
     
-    // ВАЖЛИВО: не робимо discardActiveObject тут!
-    canvas.renderAll();
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
     saveToLocal();
 }
 
@@ -357,32 +368,38 @@ function updateDimension(owner) {
     if (!owner) return;
     const { n1, n2, line, text, tick1, tick2 } = owner;
     
+    // Оновлюємо основну лінію
     line.set({ x1: n1.left, y1: n1.top, x2: n2.left, y2: n2.top });
 
+    // Позиція тексту (завжди посередині)
     const midX = (n1.left + n2.left) / 2;
     const midY = (n1.top + n2.top) / 2;
     text.set({ left: midX, top: midY });
 
-    const tickLength = 12; 
+    // Розрахунок засічок (під кутом 45° до лінії)
+    const tickLength = 10; // Довжина засічки
     const angle = Math.atan2(n2.top - n1.top, n2.left - n1.left);
-    const tickAngle = angle + (Math.PI / 4); // 45 градусів
+    
+    // Кут засічки = кут лінії + 45 градусів (PI/4)
+    const tAngle = angle + Math.PI / 2;
 
-    function setTick(tick, node) {
-        const dx = Math.cos(tickAngle) * (tickLength / 2);
-        const dy = Math.sin(tickAngle) * (tickLength / 2);
-        
+    const dx = Math.cos(tAngle) * (tickLength / 2);
+    const dy = Math.sin(tAngle) * (tickLength / 2);
+
+    function positionTick(tick, node) {
         tick.set({
             x1: node.left - dx,
             y1: node.top - dy,
             x2: node.left + dx,
             y2: node.top + dy
         });
-        tick.setCoords(); // Важливо для коректного рендеру в Fabric
+        tick.setCoords();
     }
 
-    setTick(tick1, n1);
-    setTick(tick2, n2);
+    positionTick(tick1, n1);
+    positionTick(tick2, n2);
 
+    // Оновлюємо координати об'єктів для коректного кліку
     n1.setCoords();
     n2.setCoords();
     text.setCoords();
