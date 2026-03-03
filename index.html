@@ -285,7 +285,7 @@ function createDimension(p1, p2, val) {
     const n1 = new fabric.Circle({ ...nodeProps, left: p1.x, top: p1.y });
     const n2 = new fabric.Circle({ ...nodeProps, left: p2.x, top: p2.y });
     const line = new fabric.Line([p1.x, p1.y, p2.x, p2.y], { stroke: '#FF9500', strokeWidth: 1.5, selectable: false });
-    const text = new fabric.Text(val, { fontSize: 16, fill: '#FF9500', fontFamily: 'monospace', backgroundColor: 'rgba(0,0,0,0.8)', originX: 'center', originY: 'center', hasControls: false });
+    const text = new fabric.Text(val, { fontSize: 16,padding: 20,perPixelTargetFind: false, fill: '#FF9500', fontFamily: 'monospace', backgroundColor: 'rgba(0,0,0,0.8)', originX: 'center', originY: 'center', hasControls: false });
     const tickProps = { stroke: '#FF9500', strokeWidth: 2, selectable: false };
     const tick1 = new fabric.Line([0,0,0,0], tickProps), tick2 = new fabric.Line([0,0,0,0], tickProps);
     const owner = { n1, n2, line, text, tick1, tick2 };
