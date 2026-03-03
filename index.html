@@ -31,6 +31,11 @@ body {margin:0;font-family:-apple-system,sans-serif;display:flex;height:100vh;ba
 #net-status{ display:flex; align-items:center; gap:8px; font-size:12px; padding:6px 12px; border-radius:20px; background:#1e1e1e; width:max-content; margin: 0 auto;}
 #net-status .dot{ width:8px; height:8px; border-radius:50%; background:gray; }
 #c { touch-action: none; }
+#canvas-wrapper, canvas, .upper-canvas {
+    touch-action: none !important;
+    -webkit-user-select: none;
+    user-select: none;
+}
 </style>
 </head>
 <body>
