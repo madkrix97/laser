@@ -346,16 +346,61 @@ document.getElementById('project-dropdown').onclick = (e) => {
 window.onclick = () => { document.getElementById('project-menu').style.display = 'none'; };
 
 async function loadProjects(){
-    const menu = document.getElementById('project-menu'); menu.innerHTML = "";
-    const res = await gapi.client.drive.files.list({ q: `'${rootId}' in parents and trashed=false`, orderBy:'name' });
+    const menu = document.getElementById('project-menu'); 
+    menu.innerHTML = "";
+    
+    // Отримуємо список папок з Google Drive
+    const res = await gapi.client.drive.files.list({ 
+        q: `'${rootId}' in parents and trashed=false`, 
+        orderBy:'name' 
+    });
+    
     res.result.files.forEach(f => {
-        const item = document.createElement('div'); item.className = 'menu-item'; item.innerText = "📂 " + f.name;
+        const item = document.createElement('div'); 
+        item.className = 'menu-item'; 
+        item.innerText = "📂 " + f.name;
+        
         item.onclick = async () => {
+            // 1. Оновлюємо заголовок меню
             document.getElementById('project-dropdown').innerHTML = f.name + " <small>▼</small>";
-            currentFolderId = f.id; loadPhotos();
+            
+            // 2. Змінюємо поточну папку
+            currentFolderId = f.id;
+            
+            // 3. !!! ВАЖЛИВО !!! Очищуємо канвас і старі прев'ю перед завантаженням нового проекту
+            if(canvas) {
+                canvas.clear();
+                canvas.setBackgroundImage(null, canvas.renderAll.bind(canvas));
+            }
+            document.getElementById('thumbs-container').innerHTML = "⏳..."; 
+            
+            // 4. Підвантажуємо дані (лінії) та фото саме цього проекту
+            await downloadProjectData(f.id); // Ця функція підтягне JSON з хмари
+            loadPhotos(); // Ця функція знайде фото в цій папці
         };
         menu.appendChild(item);
     });
+}
+async function downloadProjectData(folderId) {
+    setStatus("⏳ Завантаження даних проекту...");
+    try {
+        const res = await gapi.client.drive.files.list({
+            q: `'${folderId}' in parents and name contains 'data_' and trashed=false`,
+            fields: 'files(id, name)'
+        });
+
+        if (res.result.files && res.result.files.length > 0) {
+            for (const file of res.result.files) {
+                const photoId = file.name.replace('data_', '').replace('.json', '');
+                const dataRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                });
+                lineDataCache[photoId] = await dataRes.json();
+            }
+            localStorage.setItem('laser_offline_cache', JSON.stringify(lineDataCache));
+            setStatus("✅ Дані оновлено");
+        }
+    } catch (e) { console.error(e); }
 }
 
 async function loadPhotos(){
