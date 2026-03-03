@@ -164,6 +164,7 @@ async function syncAll() {
 }
 
 // ---------------- CANVAS LOGIC ----------------
+// ---------------- CANVAS LOGIC ----------------
 function initCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
     if (canvas) canvas.dispose();
@@ -182,7 +183,7 @@ function initCanvas() {
     
     let isMultiTouch = false;
     let lastTouchDist = 0;
-    let lastTouchMid = { x: 0, y: 0 }; // Для відстеження руху центру щипка
+    let lastTouchMid = { x: 0, y: 0 }; 
 
     // 1. ZOOM (Мишка + Тачпад)
     canvas.on('mouse:wheel', function(opt) {
@@ -196,16 +197,19 @@ function initCanvas() {
         opt.e.stopPropagation();
     });
 
-    // 2. РЕДАГУВАННЯ: Подвійний клік
+    // 2. РЕДАГУВАННЯ: Подвійний клік (Додано затримку для стабільності на тач-екранах)
     canvas.on('mouse:dblclick', (opt) => {
         if (opt.target && opt.target.owner) {
-            const targetText = opt.target.owner.text;
-            const v = prompt("Введіть розмір:", targetText.text);
-            if (v !== null && v.trim() !== "") {
-                targetText.set('text', v);
-                canvas.renderAll();
-                saveToLocal();
-            }
+            // Затримка допомагає мобільним браузерам коректно викликати вікно вводу
+            setTimeout(() => {
+                const targetText = opt.target.owner.text;
+                const v = prompt("Введіть розмір:", targetText.text);
+                if (v !== null && v.trim() !== "") {
+                    targetText.set('text', v);
+                    canvas.renderAll();
+                    saveToLocal();
+                }
+            }, 100);
         }
     });
 
@@ -217,7 +221,10 @@ function initCanvas() {
         if (evt.touches && evt.touches.length === 2) {
             isMultiTouch = true;
             isDragging = false;
-            firstPoint = null; // Скасовуємо малювання лінії
+            firstPoint = null; 
+            
+            // Знімаємо виділення, щоб жести працювали по всьому полю
+            canvas.discardActiveObject();
 
             lastTouchDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
@@ -228,6 +235,7 @@ function initCanvas() {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
             };
+            canvas.requestRenderAll();
             return;
         }
 
@@ -240,7 +248,8 @@ function initCanvas() {
         }
 
         // ЛОГІКА МАЛЮВАННЯ
-        if (opt.target) return;
+        if (opt.target) return; // Не малюємо, якщо натиснули на існуючий об'єкт
+        
         if (isDrawingMode && !isMultiTouch) {
             const pointer = canvas.getPointer(opt.e);
             if (!firstPoint) {
@@ -249,6 +258,11 @@ function initCanvas() {
                 createDimension(firstPoint, { x: pointer.x, y: pointer.y }, "0.000");
                 saveToLocal();
                 firstPoint = null;
+                
+                // ВАЖЛИВО: Після створення лінії знімаємо з неї фокус, 
+                // щоб планшет не думав, що ми хочемо її рухати замість зуму
+                canvas.discardActiveObject();
+                canvas.requestRenderAll();
             }
         }
     });
@@ -258,7 +272,6 @@ function initCanvas() {
 
         // ПЛАНШЕТ: Комбінований Zoom + Pan (2 пальці)
         if (isMultiTouch && evt.touches && evt.touches.length === 2) {
-            // 1. Розраховуємо новий центр та зміщення (Pan)
             const currentMid = {
                 x: (evt.touches[0].clientX + evt.touches[1].clientX) / 2,
                 y: (evt.touches[0].clientY + evt.touches[1].clientY) / 2
@@ -267,12 +280,10 @@ function initCanvas() {
             const deltaX = currentMid.x - lastTouchMid.x;
             const deltaY = currentMid.y - lastTouchMid.y;
 
-            // Рухаємо канвас слідом за центром пальців
             const vpt = canvas.viewportTransform;
             vpt[4] += deltaX;
             vpt[5] += deltaY;
 
-            // 2. Розраховуємо зміну масштабу (Zoom)
             const currentDist = Math.hypot(
                 evt.touches[0].clientX - evt.touches[1].clientX,
                 evt.touches[0].clientY - evt.touches[1].clientY
@@ -284,17 +295,15 @@ function initCanvas() {
             if (newZoom > 20) newZoom = 20;
             if (newZoom < 0.05) newZoom = 0.05;
 
-            // Робимо зум відносно поточного центру пальців
             const pointer = canvas.getPointer({ clientX: currentMid.x, clientY: currentMid.y });
             canvas.zoomToPoint({ x: pointer.x, y: pointer.y }, newZoom);
 
-            // Оновлюємо значення для наступного кадру
             lastTouchDist = currentDist;
             lastTouchMid = currentMid;
 
             canvas.requestRenderAll();
             
-            if (evt.cancelable) evt.preventDefault(); // Блокуємо скрол сторінки
+            if (evt.cancelable) evt.preventDefault(); 
             return;
         }
 
